@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAST EMBER</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="xpbar"><div id="xpfill"></div></div>
+    <div class="hud-left">
+      <div class="lv">Lv <b id="level">1</b></div>
+      <div class="bar hp"><div id="hpfill"></div><span id="hptext">100 / 100</span></div>
+      <div class="dash"><div id="dashfill"></div><span>대시</span></div>
+    </div>
+    <div class="hud-center">
+      <div id="timer">0:00</div>
+      <div id="phase">보스까지 3:00</div>
+    </div>
+    <div class="hud-right">
+      <div><span class="k">점수</span> <b id="score">0</b></div>
+      <div><span class="k">처치</span> <b id="kills">0</b></div>
+    </div>
+    <div id="boss" class="hidden">
+      <div class="boss-name">심연의 핵</div>
+      <div class="bar boss"><div id="bossfill"></div></div>
+    </div>
+    <div id="build"></div>
+  </div>
+
+  <div id="touch">
+    <div id="stick" class="hidden"><div id="knob"></div></div>
+    <button id="dashbtn" aria-label="대시">대시</button>
+    <button id="pausebtn" aria-label="일시정지">Ⅱ</button>
+  </div>
+
+  <div id="banner" class="hidden"></div>
+  <div id="toast"></div>
+
+  <section id="menu" class="overlay">
+    <div class="menu-grid">
+      <div class="panel hero">
+        <h1>LAST EMBER</h1>
+        <p class="tag">어둠이 밀려온다. 3분을 버티고 심연의 핵을 부숴라.</p>
+        <label class="name">이름
+          <input id="name" maxlength="12" placeholder="익명" autocomplete="off" spellcheck="false" />
+        </label>
+        <button id="start" class="primary">게임 시작 <kbd>Enter</kbd></button>
+        <ul class="keys">
+          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 — 공격은 자동</li>
+          <li><kbd>Space</kbd> 대시 (무적)</li>
+          <li><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 강화 선택 · <kbd>Esc</kbd> 일시정지</li>
+          <li><kbd>M</kbd> 음소거 · <kbd>F3</kbd> 성능 정보</li>
+          <li class="touch-hint">터치: 화면을 끌어 이동 · 대시 버튼으로 회피</li>
+        </ul>
+      </div>
+      <div class="panel board">
+        <h2>리더보드 <span id="net" class="net">연결 확인 중</span></h2>
+        <p class="hint">서버가 입력 기록을 재실행해 검증한 점수만 올라갑니다. ▶ 를 누르면 그 판을 그대로 다시 봅니다.</p>
+        <ol id="board"></ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="levelup" class="overlay hidden">
+    <h2>레벨 업 — 강화를 고르세요</h2>
+    <div id="cards"></div>
+  </section>
+
+  <section id="pause" class="overlay hidden">
+    <div class="panel small">
+      <h2>일시정지</h2>
+      <button id="resume" class="primary">계속하기 <kbd>Esc</kbd></button>
+      <button id="quit">메뉴로</button>
+    </div>
+  </section>
+
+  <section id="result" class="overlay hidden">
+    <div class="panel small">
+      <h2 id="result-title">결과</h2>
+      <div id="result-score">0</div>
+      <div id="result-best"></div>
+      <dl id="result-stats"></dl>
+      <div id="result-build"></div>
+      <p id="result-status"></p>
+      <button id="retry" class="primary">다시 하기 <kbd>Enter</kbd></button>
+      <button id="watch">방금 판 리플레이</button>
+      <button id="tomenu">메뉴로</button>
+    </div>
+  </section>
+
+  <pre id="debug" class="hidden"></pre>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

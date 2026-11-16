@@ -1,0 +1,406 @@
+// Canvas 2D 렌더러.
+// 시뮬레이션은 60Hz 고정이고 화면 주사율은 제각각이므로, 이전 틱 위치(px, py)와
+// 현재 위치를 alpha로 보간해서 그린다. 그리는 쪽은 상태를 읽기만 한다.
+//
+// 드로우 콜을 줄이기 위해 적은 종류별로 한 경로(Path)에 모아 한 번에 채우고,
+// 화면 밖 개체는 그리지 않는다.
+
+import { ARENA, Kind, ORBIT, PLAYER_R, Up } from '../../shared/defs.ts';
+import { type SimState, orbitBlades } from '../../shared/sim.ts';
+import type { Fx } from './fx.ts';
+
+const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8'];
+export const kindColor = (k: number): string => KIND_COLOR[k];
+
+function polygon(n: number, inner = 1): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const r = i % 2 === 1 ? inner : 1;
+    out.push(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  return out;
+}
+
+// 반지름 1 기준의 로컬 좌표 다각형
+const SHAPES: number[][] = [
+  [1.35, 0, -0.9, 0.95, -0.45, 0, -0.9, -0.95], // Chaser: 화살촉
+  [1.7, 0, -1, 0.8, -0.35, 0, -1, -0.8], // Runner: 가는 다트
+  polygon(6), // Tank: 육각형
+  [1.25, 0, 0, 1.25, -1.25, 0, 0, -1.25], // Shooter: 마름모
+  polygon(16, 0.72), // Boss: 별
+];
+
+function glowSprite(color: string, size = 64): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, color);
+  grad.addColorStop(0.35, color + '55');
+  grad.addColorStop(1, color + '00');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return c;
+}
+
+export interface DrawOptions {
+  alpha: number; // 틱 사이 보간 계수 0~1
+  time: number; // 초 단위 실제 시간 (애니메이션용)
+  showPlayer: boolean;
+}
+
+export class Renderer {
+  private ctx: CanvasRenderingContext2D;
+  private canvas: HTMLCanvasElement;
+  private w = 0;
+  private h = 0;
+  private dpr = 1;
+  private zoom = 1;
+  private glows = KIND_COLOR.map((c) => glowSprite(c));
+  private glowPlayer = glowSprite('#ffb347', 128);
+  private glowHostile = glowSprite('#ff3355');
+  private glowBlade = glowSprite('#7fe3ff');
+  private glowGem = glowSprite('#5df2c0', 32);
+  private blades: number[] = [];
+  drawn = 0; // 마지막 프레임에 실제로 그린 적 수 (디버그 표시용)
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize(): void {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.w = window.innerWidth;
+    this.h = window.innerHeight;
+    this.canvas.width = Math.round(this.w * this.dpr);
+    this.canvas.height = Math.round(this.h * this.dpr);
+    // 화면 비율이 달라도 보이는 월드 범위가 1200x700(세로 화면은 700x1200)을 넘지 않게 한다.
+    // 대각선 절반이 스폰 링 반지름(720)보다 짧아서 적이 화면 안에서 생겨나 보이지 않는다.
+    this.zoom = this.w >= this.h ? Math.max(this.w / 1200, this.h / 700) : Math.max(this.w / 700, this.h / 1200);
+  }
+
+  draw(s: SimState, fx: Fx, o: DrawOptions): void {
+    const ctx = this.ctx;
+    const a = o.alpha;
+    const p = s.player;
+    const camX = p.px + (p.x - p.px) * a + (Math.random() - 0.5) * fx.shake;
+    const camY = p.py + (p.y - p.py) * a + (Math.random() - 0.5) * fx.shake;
+    const scale = this.zoom * this.dpr;
+    const halfW = this.w / this.zoom / 2;
+    const halfH = this.h / this.zoom / 2;
+    const vx0 = camX - halfW - 60;
+    const vx1 = camX + halfW + 60;
+    const vy0 = camY - halfH - 60;
+    const vy1 = camY + halfH + 60;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#04050a';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(scale, 0, 0, scale, (this.w / 2) * this.dpr - camX * scale, (this.h / 2) * this.dpr - camY * scale);
+
+    // 바닥과 격자
+    ctx.fillStyle = '#0a0c16';
+    ctx.fillRect(0, 0, ARENA, ARENA);
+    ctx.beginPath();
+    const gx0 = Math.max(0, Math.floor(vx0 / 80) * 80);
+    const gy0 = Math.max(0, Math.floor(vy0 / 80) * 80);
+    for (let x = gx0; x <= Math.min(ARENA, vx1); x += 80) {
+      ctx.moveTo(x, Math.max(0, vy0));
+      ctx.lineTo(x, Math.min(ARENA, vy1));
+    }
+    for (let y = gy0; y <= Math.min(ARENA, vy1); y += 80) {
+      ctx.moveTo(Math.max(0, vx0), y);
+      ctx.lineTo(Math.min(ARENA, vx1), y);
+    }
+    ctx.strokeStyle = 'rgba(120,140,255,0.07)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = '#5468ff';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, ARENA, ARENA);
+
+    // ── 가산 합성 레이어: 빛 번짐 ──
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const g of s.gems) {
+      if (g.x < vx0 || g.x > vx1 || g.y < vy0 || g.y > vy1) continue;
+      const x = g.px + (g.x - g.px) * a;
+      const y = g.py + (g.y - g.py) * a;
+      const sz = g.value >= 3 ? 26 : 18;
+      ctx.drawImage(this.glowGem, x - sz / 2, y - sz / 2, sz, sz);
+    }
+
+    this.drawn = 0;
+    for (const e of s.enemies) {
+      if (e.x < vx0 || e.x > vx1 || e.y < vy0 || e.y > vy1) continue;
+      const x = e.px + (e.x - e.px) * a;
+      const y = e.py + (e.y - e.py) * a;
+      const sz = e.r * 4.6;
+      ctx.drawImage(this.glows[e.kind], x - sz / 2, y - sz / 2, sz, sz);
+      this.drawn++;
+    }
+
+    // 플레이어 탄환: 진행 방향 반대로 꼬리를 그린다
+    ctx.beginPath();
+    for (const b of s.bullets) {
+      if (b.hostile) continue;
+      const x = b.px + (b.x - b.px) * a;
+      const y = b.py + (b.y - b.py) * a;
+      ctx.moveTo(x - b.vx * 0.035, y - b.vy * 0.035);
+      ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#ffd27a';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    for (const b of s.bullets) {
+      if (!b.hostile || b.x < vx0 || b.x > vx1 || b.y < vy0 || b.y > vy1) continue;
+      const x = b.px + (b.x - b.px) * a;
+      const y = b.py + (b.y - b.py) * a;
+      ctx.drawImage(this.glowHostile, x - 14, y - 14, 28, 28);
+    }
+
+    const px = p.px + (p.x - p.px) * a;
+    const py = p.py + (p.y - p.py) * a;
+
+    // 공전 칼날
+    const bladeCount = orbitBlades(s, this.blades);
+    if (bladeCount > 0 && o.showPlayer) {
+      const radius = ORBIT.radius[s.levels[Up.Orbit] - 1];
+      ctx.beginPath();
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(127,227,255,0.10)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      for (let i = 0; i < bladeCount; i++) {
+        const bx = px + this.blades[i * 2] * radius;
+        const by = py + this.blades[i * 2 + 1] * radius;
+        ctx.drawImage(this.glowBlade, bx - 30, by - 30, 60, 60);
+      }
+    }
+
+    for (const r of fx.rings) {
+      const t = 1 - r.life / r.max;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r * (0.25 + 0.75 * t), 0, Math.PI * 2);
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 10 * (1 - t) + 2;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // 연쇄 번개: 매 프레임 지그재그를 새로 만들어 떨리게 한다
+    if (fx.bolts.length) {
+      ctx.beginPath();
+      for (const b of fx.bolts) {
+        const pts = b.pts;
+        ctx.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) {
+          const mx = (pts[i - 2] + pts[i]) / 2 + (Math.random() - 0.5) * 26;
+          const my = (pts[i - 1] + pts[i + 1]) / 2 + (Math.random() - 0.5) * 26;
+          ctx.lineTo(mx, my);
+          ctx.lineTo(pts[i], pts[i + 1]);
+        }
+      }
+      ctx.strokeStyle = '#fff27a';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    for (const q of fx.particles) {
+      ctx.globalAlpha = q.life / q.max;
+      ctx.fillStyle = q.color;
+      ctx.fillRect(q.x - q.size / 2, q.y - q.size / 2, q.size, q.size);
+    }
+    ctx.globalAlpha = 1;
+
+    if (o.showPlayer) {
+      const gs = p.dashT > 0 ? 150 : 110;
+      ctx.drawImage(this.glowPlayer, px - gs / 2, py - gs / 2, gs, gs);
+    }
+
+    // ── 일반 합성 레이어: 선명한 외곽선 ──
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.beginPath();
+    for (const g of s.gems) {
+      if (g.x < vx0 || g.x > vx1 || g.y < vy0 || g.y > vy1) continue;
+      const x = g.px + (g.x - g.px) * a;
+      const y = g.py + (g.y - g.py) * a;
+      const r = g.value >= 3 ? 6 : 4;
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r, y);
+      ctx.closePath();
+    }
+    ctx.fillStyle = '#b9ffe9';
+    ctx.fill();
+
+    // 적: 종류별로 한 경로에 모아서 fill/stroke 한 번씩
+    const spin = o.time * 0.8;
+    for (let kind = 0; kind < SHAPES.length; kind++) {
+      const shape = SHAPES[kind];
+      for (let pass = 0; pass < 2; pass++) {
+        let any = false;
+        ctx.beginPath();
+        for (const e of s.enemies) {
+          if (e.kind !== kind || e.flash > 0 !== (pass === 1)) continue;
+          if (e.x < vx0 || e.x > vx1 || e.y < vy0 || e.y > vy1) continue;
+          const x = e.px + (e.x - e.px) * a;
+          const y = e.py + (e.y - e.py) * a;
+          let ux = 1;
+          let uy = 0;
+          if (kind === Kind.Boss) {
+            ux = Math.cos(spin);
+            uy = Math.sin(spin);
+          } else if (kind !== Kind.Tank) {
+            const dx = px - x;
+            const dy = py - y;
+            const d = Math.hypot(dx, dy) || 1;
+            ux = dx / d;
+            uy = dy / d;
+          }
+          const r = e.r;
+          for (let i = 0; i < shape.length; i += 2) {
+            const lx = shape[i] * r;
+            const ly = shape[i + 1] * r;
+            const wx = x + lx * ux - ly * uy;
+            const wy = y + lx * uy + ly * ux;
+            if (i === 0) ctx.moveTo(wx, wy);
+            else ctx.lineTo(wx, wy);
+          }
+          ctx.closePath();
+          any = true;
+        }
+        if (!any) continue;
+        if (pass === 1) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+        } else {
+          ctx.fillStyle = KIND_COLOR[kind] + '3a';
+          ctx.fill();
+          ctx.strokeStyle = KIND_COLOR[kind];
+          ctx.lineWidth = kind === Kind.Boss ? 4 : 2;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        }
+      }
+    }
+
+    // 체력이 깎인 탱크는 머리 위에 체력 바
+    for (const e of s.enemies) {
+      if (e.kind !== Kind.Tank || e.hp >= e.maxHp) continue;
+      if (e.x < vx0 || e.x > vx1 || e.y < vy0 || e.y > vy1) continue;
+      const x = e.px + (e.x - e.px) * a;
+      const y = e.py + (e.y - e.py) * a;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x - 18, y - e.r - 10, 36, 4);
+      ctx.fillStyle = KIND_COLOR[Kind.Tank];
+      ctx.fillRect(x - 18, y - e.r - 10, 36 * Math.max(0, e.hp / e.maxHp), 4);
+    }
+
+    ctx.beginPath();
+    for (const b of s.bullets) {
+      if (!b.hostile || b.x < vx0 || b.x > vx1 || b.y < vy0 || b.y > vy1) continue;
+      const x = b.px + (b.x - b.px) * a;
+      const y = b.py + (b.y - b.py) * a;
+      ctx.moveTo(x + 4.5, y);
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = '#ffd0d8';
+    ctx.fill();
+
+    if (bladeCount > 0 && o.showPlayer) {
+      const radius = ORBIT.radius[s.levels[Up.Orbit] - 1];
+      ctx.beginPath();
+      for (let i = 0; i < bladeCount; i++) {
+        const bx = px + this.blades[i * 2] * radius;
+        const by = py + this.blades[i * 2 + 1] * radius;
+        ctx.moveTo(bx + 7, by);
+        ctx.arc(bx, by, 7, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = '#e8fbff';
+      ctx.fill();
+    }
+
+    if (o.showPlayer) {
+      // 피격 무적 중에는 깜빡인다
+      const blink = p.iframes > 0 && Math.floor(o.time * 20) % 2 === 0;
+      if (!blink) {
+        ctx.beginPath();
+        ctx.arc(px, py, PLAYER_R, 0, Math.PI * 2);
+        ctx.fillStyle = p.dashT > 0 ? '#ffffff' : '#fff1cf';
+        ctx.fill();
+        ctx.strokeStyle = '#ffb347';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(px + p.fx * 5, py + p.fy * 5, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff7a1a';
+        ctx.fill();
+      }
+    }
+
+    if (fx.texts.length) {
+      ctx.textAlign = 'center';
+      for (const t of fx.texts) {
+        ctx.globalAlpha = Math.min(1, t.life * 3);
+        ctx.font = `700 ${t.size}px system-ui, sans-serif`;
+        ctx.fillStyle = t.color;
+        ctx.fillText(t.text, t.x, t.y);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── 화면 고정 레이어 ──
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    // 화면 밖 보스 방향 표시
+    if (s.bossSpawned && o.showPlayer) {
+      for (const e of s.enemies) {
+        if (e.kind !== Kind.Boss) continue;
+        const dx = e.x - px;
+        const dy = e.y - py;
+        if (Math.abs(dx) < halfW - 20 && Math.abs(dy) < halfH - 20) break;
+        const ang = Math.atan2(dy, dx);
+        const k = Math.min((this.w / 2 - 36) / Math.abs(Math.cos(ang) || 1e-6), (this.h / 2 - 36) / Math.abs(Math.sin(ang) || 1e-6));
+        ctx.save();
+        ctx.translate(this.w / 2 + Math.cos(ang) * k, this.h / 2 + Math.sin(ang) * k);
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.moveTo(14, 0);
+        ctx.lineTo(-10, 10);
+        ctx.lineTo(-10, -10);
+        ctx.closePath();
+        ctx.fillStyle = KIND_COLOR[Kind.Boss];
+        ctx.fill();
+        ctx.restore();
+        break;
+      }
+    }
+
+    // 비네트 + 피격/저체력 붉은 테두리
+    const lowHp = o.showPlayer && p.hp > 0 && p.hp < p.maxHp * 0.3 ? 0.25 + 0.12 * Math.sin(o.time * 6) : 0;
+    const red = Math.max(fx.hurt * 0.6, lowHp);
+    const vg = ctx.createRadialGradient(this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.35, this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, red > 0 ? `rgba(${Math.round(120 + 135 * red)},0,${Math.round(30 * red)},${0.55 + red * 0.3})` : 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, this.w, this.h);
+
+    if (fx.flash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${fx.flash * 0.5})`;
+      ctx.fillRect(0, 0, this.w, this.h);
+    }
+  }
+}

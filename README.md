@@ -7,7 +7,7 @@
 - 서버: Node.js 24 기본 모듈만 사용 (`node:http`, `node:sqlite`, `node:worker_threads`)
 - 이미지·음원 파일 없음. 그래픽과 효과음은 전부 코드로 생성
 
-**바로 플레이: https://last-ember-bib.pages.dev** (정적 호스팅이라 오프라인 모드로 동작합니다. 리더보드와 서버 검증은 로컬에서 서버를 띄워야 볼 수 있습니다.)
+**바로 플레이: https://esin3329.github.io/last-ember/** · 미러: https://last-ember-bib.pages.dev (정적 호스팅이라 오프라인 모드로 동작합니다. 리더보드와 서버 검증은 로컬에서 서버를 띄워야 볼 수 있습니다.)
 
 ![플레이 화면](docs/screenshot.jpg)
 

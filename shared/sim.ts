@@ -853,6 +853,7 @@ function rollChoices(s: SimState): void {
     // 전부 최대 레벨이면 선택 없이 회복으로 대체
     s.player.hp = Math.min(s.player.maxHp, s.player.hp + 15 * s.pendingLevels);
     s.pendingLevels = 0;
+    s.phase = 'playing';
     return;
   }
   const k = Math.min(3, pool.length);

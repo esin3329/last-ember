@@ -12,7 +12,8 @@
     "start": "node server/src/main.ts",
     "test": "node --test \"shared/test/*.test.ts\" \"server/test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "balance": "node scripts/balance.ts"
+    "balance": "node scripts/balance.ts",
+    "verify:csharp": "node scripts/fixtures.ts && dotnet run --project csharp/LastEmber.Verify -c Release -- csharp/fixtures.json"
   },
   "engines": { "node": ">=24" },
   "devDependencies": {

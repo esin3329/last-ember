@@ -1,0 +1,6 @@
+{
+  "name": "LastEmber.Core",
+  "rootNamespace": "LastEmber.Core",
+  "noEngineReferences": true,
+  "autoReferenced": true
+}

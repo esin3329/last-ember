@@ -148,6 +148,21 @@ export class Sfx {
     if (!this.gate('win', 1)) return;
     [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => this.tone('triangle', f, f, 0.34, 0.14, i * 0.11));
   }
+  blast(): void {
+    if (this.gate('blast', 0.06)) {
+      this.tone('sine', 110, 35, 0.3, 0.2);
+      this.hiss(0.25, 0.16, 380, 0.5);
+    }
+  }
+  chest(): void {
+    if (!this.gate('chest', 0.3)) return;
+    [784, 988, 1175, 1568].forEach((f, i) => this.tone('sine', f, f * 1.01, 0.2, 0.12, i * 0.05));
+  }
+  evolve(): void {
+    if (!this.gate('evolve', 0.5)) return;
+    [262, 392, 523, 784, 1047].forEach((f, i) => this.tone('sawtooth', f, f, 0.3, 0.07, i * 0.06));
+    this.tone('sine', 60, 30, 0.8, 0.25);
+  }
   lose(): void {
     if (!this.gate('lose', 1)) return;
     [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.96, 0.4, 0.1, i * 0.18));

@@ -2,7 +2,7 @@
 // 글자가 많은 UI는 캔버스보다 DOM이 선명하고 접근성도 좋다.
 // HUD는 매 프레임 호출되므로 값이 바뀔 때만 DOM을 건드린다.
 
-import { BOSS_TICK, DASH_CD, DT, Kind, UPGRADE_MAX, UPGRADE_META } from '../../shared/defs.ts';
+import { BOSS_TICK, DASH_CD, DT, EVOLUTIONS, Kind, UPGRADE_META, comboTier, maxLevel } from '../../shared/defs.ts';
 import type { SimState } from '../../shared/sim.ts';
 import type { BoardEntry } from './api.ts';
 
@@ -12,6 +12,7 @@ const el = {
   hud: $('hud'), xp: $('xpfill'), hp: $('hpfill'), hpText: $('hptext'), level: $('level'),
   dash: $('dashfill'), timer: $('timer'), phase: $('phase'), score: $('score'), kills: $('kills'),
   boss: $('boss'), bossFill: $('bossfill'), build: $('build'),
+  combo: $('combo'), mult: $('mult'), comboBox: $('combo-box'),
   banner: $('banner'), toast: $('toast'),
   menu: $('menu'), name: $<HTMLInputElement>('name'), start: $<HTMLButtonElement>('start'),
   net: $('net'), board: $('board'),
@@ -72,6 +73,13 @@ export function updateHud(s: SimState): void {
   setText('timer', el.timer, fmtTime(s.tick * DT));
   setText('score', el.score, s.score.toLocaleString());
   setText('kills', el.kills, s.kills.toLocaleString());
+  setText('combo', el.combo, s.combo);
+  const tier = comboTier(s.combo);
+  setText('mult', el.mult, tier > 0 ? `×${(2 + tier) / 2}` : '');
+  if (last.hot !== tier) {
+    last.hot = tier;
+    el.comboBox.classList.toggle('hot', tier > 0);
+  }
 
   const phase = s.bossSpawned ? '보스전 — 심연의 핵을 부숴라' : `보스까지 ${fmtTime((BOSS_TICK - s.tick) * DT + 0.99)}`;
   setText('phase', el.phase, phase);
@@ -102,14 +110,14 @@ function buildChips(levels: number[]): HTMLElement[] {
     if (lv === 0) return [];
     const meta = UPGRADE_META[i];
     const chip = document.createElement('div');
-    chip.className = 'chip';
+    chip.className = meta.evo ? 'chip evo' : 'chip';
     const icon = document.createElement('i');
     icon.textContent = meta.icon;
     icon.style.color = meta.color;
     const name = document.createElement('span');
     name.textContent = meta.name;
     const small = document.createElement('small');
-    small.textContent = lv >= UPGRADE_MAX ? 'MAX' : `Lv${lv}`;
+    small.textContent = meta.evo ? '진화' : lv >= maxLevel(i) ? 'MAX' : `Lv${lv}`;
     chip.append(icon, name, small);
     return [chip];
   });
@@ -173,7 +181,7 @@ export function showLevelUp(s: SimState, onPick: (index: number) => void): void 
       const meta = UPGRADE_META[up];
       const cur = s.levels[up];
       const card = document.createElement('button');
-      card.className = 'card';
+      card.className = meta.evo ? 'card evo' : 'card';
       card.style.setProperty('--c', meta.color);
       const key = document.createElement('kbd');
       key.className = 'key';
@@ -183,7 +191,7 @@ export function showLevelUp(s: SimState, onPick: (index: number) => void): void 
       icon.textContent = meta.icon;
       const kind = document.createElement('div');
       kind.className = 'kind';
-      kind.textContent = cur === 0 ? (meta.weapon ? '새 무기' : '새 능력') : `Lv ${cur} → ${cur + 1}`;
+      kind.textContent = meta.evo ? '★ 진화' : cur === 0 ? (meta.weapon ? '새 무기' : '새 능력') : `Lv ${cur} → ${cur + 1}`;
       const title = document.createElement('div');
       title.className = 'title';
       title.textContent = meta.name;
@@ -192,13 +200,21 @@ export function showLevelUp(s: SimState, onPick: (index: number) => void): void 
       desc.textContent = meta.desc(cur + 1);
       const pips = document.createElement('div');
       pips.className = 'pips';
-      for (let k = 0; k < UPGRADE_MAX; k++) {
+      for (let k = 0; k < maxLevel(up); k++) {
         const pip = document.createElement('span');
         if (k < cur) pip.className = 'on';
         else if (k === cur) pip.className = 'new';
         pips.append(pip);
       }
       card.append(key, icon, kind, title, desc, pips);
+      // 일반 무기 카드에는 진화 조건을 작게 알려 준다 (빌드 목표 제시)
+      const recipe = EVOLUTIONS.find((e) => e.weapon === up);
+      if (recipe) {
+        const hint = document.createElement('div');
+        hint.className = 'recipe';
+        hint.textContent = `진화: MAX + ${UPGRADE_META[recipe.passive].name} Lv2 → ${UPGRADE_META[recipe.evo].name}`;
+        card.append(hint);
+      }
       card.addEventListener('click', () => onPick(i));
       return card;
     }),

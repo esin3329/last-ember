@@ -2,7 +2,7 @@
 //   npm run balance -- 40
 
 import { botInput } from '../shared/bot.ts';
-import { DT, UPGRADE_META } from '../shared/defs.ts';
+import { BASE_UPGRADES, DT, UPGRADE_COUNT, UPGRADE_META } from '../shared/defs.ts';
 import type { InputFrame } from '../shared/input.ts';
 import { createSim, step } from '../shared/sim.ts';
 
@@ -16,6 +16,8 @@ let totalMs = 0;
 let maxEnemies = 0;
 const times: number[] = [];
 const levels: number[] = [];
+const combos: number[] = [];
+let evolved = 0;
 
 for (let seed = 1; seed <= runs; seed++) {
   const s = createSim(seed * 7919, false);
@@ -29,6 +31,8 @@ for (let seed = 1; seed <= runs; seed++) {
   times.push(s.tick * DT);
   levels.push(s.player.level);
   if (s.bossSpawned) reachedBoss++;
+  for (let i = BASE_UPGRADES; i < UPGRADE_COUNT; i++) if (s.levels[i] > 0) evolved++;
+  combos.push(s.bestCombo);
   if (s.phase === 'won') wins++;
   if (seed <= 5) {
     const build = s.levels.map((l, i) => (l ? `${UPGRADE_META[i].name}${l}` : '')).filter(Boolean).join(' ');
@@ -40,4 +44,5 @@ times.sort((a, b) => a - b);
 const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 console.log(`\n${runs}판 | 보스 도달 ${reachedBoss} | 승리 ${wins}`);
 console.log(`생존 시간 중앙값 ${times[times.length >> 1].toFixed(0)}s, 평균 ${avg(times).toFixed(0)}s, 평균 레벨 ${avg(levels).toFixed(1)}`);
+console.log(`진화 ${evolved}회 (판당 ${(evolved / runs).toFixed(2)}) | 최고 콤보 평균 ${avg(combos).toFixed(0)}`);
 console.log(`최대 동시 적 ${maxEnemies} | 틱당 ${((totalMs / totalTicks) * 1000).toFixed(1)}µs | 한 판 검증 평균 ${(totalMs / runs).toFixed(1)}ms`);

@@ -24,7 +24,22 @@ namespace LastEmber.Core
         public double Kx, Ky;       // 넉백 속도
         public double Hp, MaxHp, R, Speed, Dmg;
         public int Cd, Cd2, Flash, OrbitCd, Mark;
+        public bool Elite;
+        public int Stun;          // 마비 남은 틱
+        public int Mode, Timer;   // 행동 상태 (자폭병: 1=점화, 보스: 1=조준 2=돌진)
+        public double Ax, Ay;     // 보스 돌진 방향
         public bool Dead;
+    }
+
+    public sealed class Chest
+    {
+        public double X, Y;
+    }
+
+    public struct Blast
+    {
+        public double X, Y, R, Dmg;
+        public bool HurtsPlayer;
     }
 
     public sealed class Bullet
@@ -53,15 +68,17 @@ namespace LastEmber.Core
 
     public enum EventType
     {
-        Hit, Kill, Shoot, EnemyShoot, Nova, Chain, Gem, Dash, PlayerHit, LevelUp, BossSpawn, Wave, Win, Dead,
+        Hit, Kill, Shoot, EnemyShoot, Nova, Chain, Blast, Gem, Chest, Dash, PlayerHit, Combo, LevelUp, Evolve,
+        Elite, Charge, BossSpawn, Wave, Win, Dead,
     }
 
     /// <summary>연출용 이벤트. 렌더러(Unity라면 MonoBehaviour)가 받아서 파티클·사운드를 재생한다.</summary>
     public struct SimEvent
     {
         public EventType Type;
-        public double X, Y, Value; // Value: 피해량(Hit, PlayerHit) 또는 반지름(Nova, Kill)
-        public int Kind;
+        public double X, Y, Value; // Value: 피해량(Hit, PlayerHit) 또는 반지름(Nova, Kill, Blast)
+        public int Kind;           // Kill: 적 종류, Evolve: 업그레이드, Combo: 단계, PlayerHit: 끊긴 콤보
+        public bool Flag;          // Kill: 엘리트, Nova/Chain: 진화, Blast: 플레이어에게 피해
         public double[] Points;    // Chain: x0, y0, x1, y1, ...
     }
 
@@ -80,6 +97,7 @@ namespace LastEmber.Core
         const double Rot22C = 0.9238795325112867, Rot22S = 0.3826834323650898;       // 22.5도
         const double Rot11C = 0.9807852804032304, Rot11S = 0.19509032201612825;      // 11.25도
         const double Rot120C = -0.5, Rot120S = 0.8660254037844386;
+        const double Rot60C = 0.5, Rot60S = 0.8660254037844386;
 
         public readonly Rng Rng;
         public int Tick;
@@ -91,10 +109,12 @@ namespace LastEmber.Core
         public readonly List<Enemy> Enemies = new List<Enemy>();
         public readonly List<Bullet> Bullets = new List<Bullet>();
         public readonly List<Gem> Gems = new List<Gem>();
+        public readonly List<Chest> Chests = new List<Chest>();
         public double OrbX = 1, OrbY = 0; // 공전 칼날 기준 방향 벡터
         public bool BossSpawned;
         public int BossId = -1;
         public int Kills, Score;
+        public int Combo, BestCombo; // 마지막 피격 이후 처치 수
 
         /// <summary>false면 이벤트를 만들지 않는다(서버 검증처럼 연출이 필요 없을 때).</summary>
         public readonly bool Emit;
@@ -110,7 +130,9 @@ namespace LastEmber.Core
         readonly int[] gridHead = new int[GW * GW];
         readonly int[] gridNext = new int[MaxEnemies];
         readonly int[] scratch = new int[MaxEnemies];
+        readonly int[] scratch2 = new int[MaxEnemies];
         readonly List<int> pool = new List<int>();
+        readonly List<Blast> blasts = new List<Blast>();
 
         public Sim(int seed, bool emit = true)
         {
@@ -142,7 +164,7 @@ namespace LastEmber.Core
             regen = 0.6 * Levels[Up.Regen];
         }
 
-        int CdTicks(int baseTicks)
+        int CdTicks(double baseTicks)
         {
             return (int)Math.Floor(baseTicks * cdMul + 0.5);
         }
@@ -182,6 +204,7 @@ namespace LastEmber.Core
             TouchPlayer();
             FireWeapons();
             UpdateBullets();
+            ResolveBlasts();
             UpdateGems();
             RemoveDead();
 
@@ -257,7 +280,8 @@ namespace LastEmber.Core
         {
             Player.Hp -= dmg;
             Player.Iframes = Defs.HitIframes;
-            if (Emit) Events.Add(new SimEvent { Type = EventType.PlayerHit, Value = dmg });
+            if (Emit) Events.Add(new SimEvent { Type = EventType.PlayerHit, Value = dmg, Kind = Combo });
+            Combo = 0;
         }
 
         // ───────────────────────── 스폰 ─────────────────────────
@@ -316,10 +340,12 @@ namespace LastEmber.Core
             double roll = Rng.NextFloat();
             double tank = sec > 80 ? 0.1 : 0;
             double shooter = sec > 45 ? 0.14 : 0;
+            double bomber = sec > 60 ? 0.08 : 0;
             double runner = sec > 15 ? 0.26 : 0;
             if (roll < tank) return Kind.Tank;
             if (roll < tank + shooter) return Kind.Shooter;
-            if (roll < tank + shooter + runner) return Kind.Runner;
+            if (roll < tank + shooter + bomber) return Kind.Bomber;
+            if (roll < tank + shooter + bomber + runner) return Kind.Runner;
             return Kind.Chaser;
         }
 
@@ -334,6 +360,7 @@ namespace LastEmber.Core
                 {
                     BossId = boss.Id;
                     boss.Cd = 120;
+                    boss.Timer = Defs.ChargeCd;
                 }
                 if (Emit) Events.Add(new SimEvent { Type = EventType.BossSpawn });
             }
@@ -362,6 +389,22 @@ namespace LastEmber.Core
                 }
                 if (Emit) Events.Add(new SimEvent { Type = EventType.Wave });
             }
+
+            // 45초마다 엘리트. 보스전에는 나오지 않는다.
+            if (!BossSpawned && Tick % Defs.EliteEvery == 0)
+            {
+                Enemy e = SpawnAtRing(Kind.Tank, MaxEnemies - 1);
+                if (e != null)
+                {
+                    e.Elite = true;
+                    e.Hp *= Defs.EliteHpMul;
+                    e.MaxHp = e.Hp;
+                    e.R *= Defs.EliteRMul;
+                    e.Speed *= Defs.EliteSpeedMul;
+                    e.Dmg *= Defs.EliteDmgMul;
+                    if (Emit) Events.Add(new SimEvent { Type = EventType.Elite });
+                }
+            }
         }
 
         // ───────────────────────── 적 ─────────────────────────
@@ -386,6 +429,17 @@ namespace LastEmber.Core
                 e.Py = e.Y;
                 if (e.Flash > 0) e.Flash--;
                 if (e.OrbitCd > 0) e.OrbitCd--;
+
+                // 마비: 넉백만 받고 아무 행동도 하지 않는다 (자폭 도화선도 멈춘다).
+                if (e.Stun > 0)
+                {
+                    e.Stun--;
+                    e.X = Clamp(e.X + e.Kx * Defs.DT, e.R, Defs.Arena - e.R);
+                    e.Y = Clamp(e.Y + e.Ky * Defs.DT, e.R, Defs.Arena - e.R);
+                    e.Kx *= 0.86;
+                    e.Ky *= 0.86;
+                    continue;
+                }
 
                 double dx = p.X - e.X;
                 double dy = p.Y - e.Y;
@@ -415,6 +469,26 @@ namespace LastEmber.Core
                         e.Cd = 130;
                         HostileBullet(e.X, e.Y, dx, dy, 210, e.Dmg);
                         if (Emit) Events.Add(new SimEvent { Type = EventType.EnemyShoot, X = e.X, Y = e.Y });
+                    }
+                }
+                else if (e.Kind == Kind.Bomber)
+                {
+                    if (e.Mode == 0 && d < Defs.BomberTrigger)
+                    {
+                        e.Mode = 1;
+                        e.Timer = Defs.BomberFuse;
+                    }
+                    if (e.Mode == 1)
+                    {
+                        // 점화 중에는 거의 멈춰서 폭발 범위를 보여 준다.
+                        mx *= 0.15;
+                        my *= 0.15;
+                        if (--e.Timer <= 0)
+                        {
+                            e.Dead = true; // 자폭은 처치로 치지 않는다 (점수·경험치 없음)
+                            blasts.Add(new Blast { X = e.X, Y = e.Y, R = Defs.BomberRadius, Dmg = Defs.BomberDmgEnemy, HurtsPlayer = true });
+                            continue;
+                        }
                     }
                 }
                 else if (e.Kind == Kind.Boss)
@@ -454,6 +528,43 @@ namespace LastEmber.Core
                     {
                         mx *= 1.35;
                         my *= 1.35;
+                        // 2페이즈: 대기 → 조준(예고) → 돌진
+                        if (e.Mode == 0)
+                        {
+                            if (--e.Timer <= 0)
+                            {
+                                e.Mode = 1;
+                                e.Timer = Defs.ChargeWindup;
+                                e.Ax = dx;
+                                e.Ay = dy;
+                                if (Emit) Events.Add(new SimEvent { Type = EventType.Charge });
+                            }
+                        }
+                        else if (e.Mode == 1)
+                        {
+                            mx = 0;
+                            my = 0;
+                            if (e.Timer > Defs.ChargeLock)
+                            {
+                                e.Ax = dx;
+                                e.Ay = dy;
+                            }
+                            if (--e.Timer <= 0)
+                            {
+                                e.Mode = 2;
+                                e.Timer = Defs.ChargeDash;
+                            }
+                        }
+                        else
+                        {
+                            mx = (e.Ax * Defs.ChargeSpeed) / e.Speed;
+                            my = (e.Ay * Defs.ChargeSpeed) / e.Speed;
+                            if (--e.Timer <= 0)
+                            {
+                                e.Mode = 0;
+                                e.Timer = Defs.ChargeCd;
+                            }
+                        }
                     }
                 }
 
@@ -584,17 +695,62 @@ namespace LastEmber.Core
             e.Hp -= dmg;
             e.Flash = 5;
             EnemyDef def = Defs.Enemies[e.Kind];
-            e.Kx += kx * def.Kb;
-            e.Ky += ky * def.Kb;
+            double kb = def.Kb * (e.Elite ? Defs.EliteKbMul : 1);
+            e.Kx += kx * kb;
+            e.Ky += ky * kb;
             if (Emit) Events.Add(new SimEvent { Type = EventType.Hit, X = e.X, Y = e.Y, Value = dmg });
             if (e.Hp > 0) return;
 
             e.Dead = true;
             Kills++;
-            Score += def.Score;
-            if (def.Xp > 0) DropGem(e.X, e.Y, def.Xp);
-            if (Emit) Events.Add(new SimEvent { Type = EventType.Kill, X = e.X, Y = e.Y, Kind = e.Kind, Value = e.R });
+            // 콤보 배율: 정수 연산으로만 계산 (tier 0~4 → 1.0~3.0배)
+            int tier = Defs.ComboTier(Combo);
+            int baseScore = e.Elite ? Defs.EliteScore : def.Score;
+            Score += (baseScore * (2 + tier)) / 2;
+            Combo++;
+            if (Combo > BestCombo) BestCombo = Combo;
+            if (Emit && Defs.ComboTier(Combo) > tier) Events.Add(new SimEvent { Type = EventType.Combo, Kind = tier + 1 });
+
+            if (def.Xp > 0) DropGem(e.X, e.Y, e.Elite ? def.Xp * Defs.EliteXpMul : def.Xp);
+            if (e.Elite) Chests.Add(new Chest { X = e.X, Y = e.Y });
+            // 먼저 잡은 자폭병은 적에게만 피해를 주는 폭발로 바뀐다 (연쇄 유도).
+            if (e.Kind == Kind.Bomber)
+            {
+                blasts.Add(new Blast { X = e.X, Y = e.Y, R = Defs.BomberRadius, Dmg = Defs.BomberDmgEnemy * dmgMul, HurtsPlayer = false });
+            }
+            if (Emit) Events.Add(new SimEvent { Type = EventType.Kill, X = e.X, Y = e.Y, Kind = e.Kind, Value = e.R, Flag = e.Elite });
             if (e.Kind == Kind.Boss) Phase = Phase.Won;
+        }
+
+        /// <summary>쌓인 폭발을 순서대로 처리한다. 처리 중 새로 생긴 폭발(연쇄)도 같은 틱에 이어서 푼다.</summary>
+        void ResolveBlasts()
+        {
+            Player p = Player;
+            for (int i = 0; i < blasts.Count; i++)
+            {
+                Blast b = blasts[i];
+                if (b.HurtsPlayer && p.Iframes == 0 && p.DashT == 0)
+                {
+                    double dx = p.X - b.X;
+                    double dy = p.Y - b.Y;
+                    double rr = b.R + Defs.PlayerR;
+                    if (dx * dx + dy * dy < rr * rr) HurtPlayer(Defs.BomberDmgPlayer);
+                }
+                // DamageEnemy가 다시 폭발을 큐에 넣을 수 있으므로 쿼리 결과를 따로 복사해 둔다.
+                int n = Query(b.X, b.Y, b.R);
+                Array.Copy(scratch, scratch2, n);
+                for (int k = 0; k < n; k++)
+                {
+                    Enemy e = Enemies[scratch2[k]];
+                    double dx = e.X - b.X;
+                    double dy = e.Y - b.Y;
+                    double d = Math.Sqrt(dx * dx + dy * dy);
+                    if (d == 0) d = 1;
+                    DamageEnemy(e, e.Kind == Kind.Boss ? b.Dmg * Defs.BossBlastMul : b.Dmg, (dx / d) * 220, (dy / d) * 220);
+                }
+                if (Emit) Events.Add(new SimEvent { Type = EventType.Blast, X = b.X, Y = b.Y, Value = b.R, Flag = b.HurtsPlayer });
+            }
+            blasts.Clear();
         }
 
         void RemoveDead()
@@ -656,6 +812,7 @@ namespace LastEmber.Core
                 if (target != null)
                 {
                     int lv = L[Up.Bolt] - 1;
+                    bool evo = L[Up.SunLance] > 0;
                     boltCd = CdTicks(Defs.BoltCd[lv]);
                     double dx = target.X - p.X;
                     double dy = target.Y - p.Y;
@@ -663,9 +820,9 @@ namespace LastEmber.Core
                     if (d == 0) d = 1;
                     double ux = dx / d;
                     double uy = dy / d;
-                    double dmg = Defs.BoltDmg[lv] * dmgMul;
+                    double dmg = Defs.BoltDmg[lv] * dmgMul * (evo ? Defs.SunLanceDmgMul : 1);
                     int count = Defs.BoltCount[lv];
-                    int pierce = Defs.BoltPierce[lv];
+                    int pierce = Defs.BoltPierce[lv] + (evo ? Defs.SunLancePierceAdd : 0);
                     // 부채꼴: 방향 벡터에 수직 성분을 더해서 만든다.
                     if (count == 1)
                     {
@@ -697,20 +854,37 @@ namespace LastEmber.Core
             if (L[Up.Orbit] > 0)
             {
                 int lv = L[Up.Orbit] - 1;
-                int blades = Defs.OrbitBlades[lv];
-                double radius = Defs.OrbitRadius[lv];
-                double dmg = Defs.OrbitDmg[lv] * dmgMul;
+                bool evo = L[Up.Tempest] > 0;
+                int blades = OrbitCount();
+                double radius = OrbitRadiusNow();
+                double dmg = Defs.OrbitDmg[lv] * dmgMul * (evo ? Defs.TempestDmgMul : 1);
+                double erase2 = Defs.TempestEraseR * Defs.TempestEraseR;
                 double bx = OrbX;
                 double by = OrbY;
                 for (int k = 0; k < blades; k++)
                 {
-                    int n = Query(p.X + bx * radius, p.Y + by * radius, Defs.OrbitBladeR);
+                    double cx = p.X + bx * radius;
+                    double cy = p.Y + by * radius;
+                    int n = Query(cx, cy, Defs.OrbitBladeR);
                     for (int i = 0; i < n; i++)
                     {
                         Enemy e = Enemies[scratch[i]];
                         if (e.OrbitCd > 0) continue;
                         e.OrbitCd = Defs.OrbitHitCd;
                         DamageEnemy(e, dmg, bx * 160, by * 160);
+                    }
+                    if (evo)
+                    {
+                        // 칼날에 닿은 적 탄환은 다음 탄환 갱신에서 사라진다.
+                        List<Bullet> bs = Bullets;
+                        for (int j = 0; j < bs.Count; j++)
+                        {
+                            Bullet b = bs[j];
+                            if (!b.Hostile) continue;
+                            double ex = b.X - cx;
+                            double ey = b.Y - cy;
+                            if (ex * ex + ey * ey < erase2) b.Life = 1;
+                        }
                     }
                     OrbitNext(ref bx, ref by, blades);
                 }
@@ -723,8 +897,9 @@ namespace LastEmber.Core
                 if (novaCd == 0)
                 {
                     int lv = L[Up.Nova] - 1;
+                    bool evo = L[Up.Bloom] > 0;
                     novaCd = CdTicks(Defs.NovaCd[lv]);
-                    double r = Defs.NovaRadius[lv];
+                    double r = Defs.NovaRadius[lv] * (evo ? Defs.BloomRadiusMul : 1);
                     double dmg = Defs.NovaDmg[lv] * dmgMul;
                     int n = Query(p.X, p.Y, r);
                     for (int i = 0; i < n; i++)
@@ -736,7 +911,12 @@ namespace LastEmber.Core
                         if (d == 0) d = 1;
                         DamageEnemy(e, dmg, (dx / d) * Defs.NovaKb, (dy / d) * Defs.NovaKb);
                     }
-                    if (Emit) Events.Add(new SimEvent { Type = EventType.Nova, X = p.X, Y = p.Y, Value = r });
+                    if (evo && n > 0)
+                    {
+                        double heal = n * Defs.BloomHealPerHit;
+                        p.Hp = Math.Min(p.MaxHp, p.Hp + (heal < Defs.BloomHealMax ? heal : Defs.BloomHealMax));
+                    }
+                    if (Emit) Events.Add(new SimEvent { Type = EventType.Nova, X = p.X, Y = p.Y, Value = r, Flag = evo });
                 }
             }
 
@@ -747,24 +927,26 @@ namespace LastEmber.Core
                 if (chainCd == 0)
                 {
                     int lv = L[Up.Chain] - 1;
+                    bool evo = L[Up.Thunder] > 0;
                     int mark = ++markSeq;
                     Enemy cur = NearestEnemy(p.X, p.Y, Defs.ChainRange, mark);
                     if (cur != null)
                     {
-                        chainCd = CdTicks(Defs.ChainCd[lv]);
-                        double dmg = Defs.ChainDmg[lv] * dmgMul;
+                        chainCd = CdTicks(Defs.ChainCd[lv] * (evo ? Defs.ThunderCdMul : 1));
+                        double dmg = Defs.ChainDmg[lv] * dmgMul * (evo ? Defs.ThunderDmgMul : 1);
                         List<double> pts = Emit ? new List<double> { p.X, p.Y } : null;
-                        int hops = Defs.ChainJumps[lv] + 1;
+                        int hops = (evo ? Defs.ThunderJumps : Defs.ChainJumps[lv]) + 1;
                         while (cur != null && hops-- > 0)
                         {
                             cur.Mark = mark;
                             if (pts != null) { pts.Add(cur.X); pts.Add(cur.Y); }
                             double cx = cur.X;
                             double cy = cur.Y;
+                            if (evo && cur.Kind != Kind.Boss) cur.Stun = Defs.ThunderStun;
                             DamageEnemy(cur, dmg, 0, 0);
                             cur = NearestEnemy(cx, cy, Defs.ChainJumpRange, mark);
                         }
-                        if (pts != null) Events.Add(new SimEvent { Type = EventType.Chain, Points = pts.ToArray() });
+                        if (pts != null) Events.Add(new SimEvent { Type = EventType.Chain, Points = pts.ToArray(), Flag = evo });
                     }
                 }
             }
@@ -784,6 +966,11 @@ namespace LastEmber.Core
                 x = ox * Rot120C - oy * Rot120S;
                 y = ox * Rot120S + oy * Rot120C;
             }
+            else if (blades == 6)
+            {
+                x = ox * Rot60C - oy * Rot60S;
+                y = ox * Rot60S + oy * Rot60C;
+            }
             else
             {
                 x = -oy;
@@ -791,12 +978,25 @@ namespace LastEmber.Core
             }
         }
 
-        /// <summary>렌더러가 칼날 위치를 그릴 때 쓰는 헬퍼. dirs에 (x, y) 방향을 채우고 개수를 반환.</summary>
-        public int OrbitBlades(double[] dirs)
+        /// <summary>공전 칼날 개수 (진화하면 6개).</summary>
+        public int OrbitCount()
         {
             int lv = Levels[Up.Orbit];
             if (lv == 0) return 0;
-            int blades = Defs.OrbitBlades[lv - 1];
+            return Levels[Up.Tempest] > 0 ? Defs.TempestBlades : Defs.OrbitBlades[lv - 1];
+        }
+
+        public double OrbitRadiusNow()
+        {
+            int lv = Levels[Up.Orbit];
+            if (lv == 0) return 0;
+            return Levels[Up.Tempest] > 0 ? Defs.TempestRadius : Defs.OrbitRadius[lv - 1];
+        }
+
+        /// <summary>렌더러가 칼날 위치를 그릴 때 쓰는 헬퍼. dirs에 (x, y) 방향을 채우고 개수를 반환.</summary>
+        public int OrbitBlades(double[] dirs)
+        {
+            int blades = OrbitCount();
             double bx = OrbX, by = OrbY;
             for (int k = 0; k < blades; k++)
             {
@@ -813,6 +1013,7 @@ namespace LastEmber.Core
         {
             Player p = Player;
             List<Bullet> bs = Bullets;
+            bool lance = Levels[Up.SunLance] > 0;
             int w = 0;
             for (int i = 0; i < bs.Count; i++)
             {
@@ -841,6 +1042,7 @@ namespace LastEmber.Core
                         Enemy e = Enemies[scratch[k]];
                         if (e.Id == b.LastHit) continue;
                         b.LastHit = e.Id;
+                        if (lance) blasts.Add(new Blast { X = e.X, Y = e.Y, R = Defs.SunLanceBlastR, Dmg = b.Dmg * Defs.SunLanceBlastMul, HurtsPlayer = false });
                         DamageEnemy(e, b.Dmg, b.Vx * 0.22, b.Vy * 0.22);
                         if (b.Pierce-- <= 0) alive = false;
                         break;
@@ -891,6 +1093,24 @@ namespace LastEmber.Core
                 gs[w++] = g;
             }
             gs.RemoveRange(w, gs.Count - w);
+
+            // 보물 상자: 자석에 끌려오지 않으므로 직접 가서 주워야 한다 (위험 감수 보상).
+            List<Chest> cs = Chests;
+            w = 0;
+            for (int i = 0; i < cs.Count; i++)
+            {
+                Chest c = cs[i];
+                double dx = p.X - c.X;
+                double dy = p.Y - c.Y;
+                if (dx * dx + dy * dy < Defs.ElitePickR * Defs.ElitePickR)
+                {
+                    PendingLevels++;
+                    if (Emit) Events.Add(new SimEvent { Type = EventType.Chest });
+                    continue;
+                }
+                cs[w++] = c;
+            }
+            cs.RemoveRange(w, cs.Count - w);
         }
 
         void GainXp(int value)
@@ -909,14 +1129,31 @@ namespace LastEmber.Core
 
         // ───────────────────────── 레벨업 ─────────────────────────
 
+        /// <summary>진화 조건(무기 MAX + 짝 패시브 Lv2 이상)을 만족하고 아직 진화하지 않았는지.</summary>
+        public static bool CanEvolve(int[] levels, int evo)
+        {
+            foreach (Evolution ev in Defs.Evolutions)
+            {
+                if (ev.Evo != evo) continue;
+                return levels[evo] == 0 && levels[ev.Weapon] >= Defs.UpgradeMax && levels[ev.Passive] >= Defs.EvoPassiveLv;
+            }
+            return false;
+        }
+
         void RollChoices()
         {
+            // 진화 가능한 것은 무작위 없이 앞자리에 고정으로 보여 준다.
+            Choices.Clear();
+            for (int i = 0; i < Defs.Evolutions.Length && Choices.Count < 3; i++)
+            {
+                if (CanEvolve(Levels, Defs.Evolutions[i].Evo)) Choices.Add(Defs.Evolutions[i].Evo);
+            }
             pool.Clear();
-            for (int i = 0; i < Defs.UpgradeCount; i++)
+            for (int i = 0; i < Defs.BaseUpgrades; i++)
             {
                 if (Levels[i] < Defs.UpgradeMax) pool.Add(i);
             }
-            if (pool.Count == 0)
+            if (Choices.Count == 0 && pool.Count == 0)
             {
                 // 전부 최대 레벨이면 선택 없이 회복으로 대체
                 Player.Hp = Math.Min(Player.MaxHp, Player.Hp + 15 * PendingLevels);
@@ -924,16 +1161,15 @@ namespace LastEmber.Core
                 Phase = Phase.Playing;
                 return;
             }
-            int k = Math.Min(3, pool.Count);
+            int k = Math.Min(3 - Choices.Count, pool.Count);
             for (int i = 0; i < k; i++)
             {
                 int j = i + Rng.NextInt(pool.Count - i);
                 int t = pool[i];
                 pool[i] = pool[j];
                 pool[j] = t;
+                Choices.Add(pool[i]);
             }
-            Choices.Clear();
-            for (int i = 0; i < k; i++) Choices.Add(pool[i]);
             Phase = Phase.LevelUp;
             if (Emit) Events.Add(new SimEvent { Type = EventType.LevelUp });
         }
@@ -946,6 +1182,7 @@ namespace LastEmber.Core
                 Player.MaxHp += 20;
                 Player.Hp = Math.Min(Player.MaxHp, Player.Hp + 20);
             }
+            if (idx >= Defs.BaseUpgrades && Emit) Events.Add(new SimEvent { Type = EventType.Evolve, Kind = idx });
             RecomputeStats();
         }
 
@@ -965,6 +1202,8 @@ namespace LastEmber.Core
                 h = (h ^ (int)Math.Floor(Player.X * 1000)) * 0x01000193;
                 h = (h ^ (int)Math.Floor(Player.Y * 1000)) * 0x01000193;
                 h = (h ^ Enemies.Count) * 0x01000193;
+                h = (h ^ BestCombo) * 0x01000193;
+                h = (h ^ Chests.Count) * 0x01000193;
                 h = (h ^ Rng.S) * 0x01000193;
                 return (uint)h;
             }

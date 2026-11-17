@@ -9,6 +9,7 @@ namespace LastEmber.Core
         public const int Tank = 2;
         public const int Shooter = 3;
         public const int Boss = 4;
+        public const int Bomber = 5;
     }
 
     public static class Up
@@ -23,6 +24,11 @@ namespace LastEmber.Core
         public const int Vital = 7;
         public const int Magnet = 8;
         public const int Regen = 9;
+        // 진화 (무기 MAX + 짝 패시브 Lv2 이상일 때만 선택지에 나온다)
+        public const int SunLance = 10;
+        public const int Tempest = 11;
+        public const int Bloom = 12;
+        public const int Thunder = 13;
     }
 
     public readonly struct EnemyDef
@@ -36,9 +42,19 @@ namespace LastEmber.Core
         }
     }
 
+    public readonly struct Evolution
+    {
+        public readonly int Evo, Weapon, Passive;
+
+        public Evolution(int evo, int weapon, int passive)
+        {
+            Evo = evo; Weapon = weapon; Passive = passive;
+        }
+    }
+
     public static class Defs
     {
-        public const int SimVersion = 1;
+        public const int SimVersion = 2;
 
         public const int TickRate = 60;
         public const double DT = 1.0 / TickRate;
@@ -54,8 +70,12 @@ namespace LastEmber.Core
         public const double DashSpeed = 760;
         public const int HitIframes = 40;
 
-        public const int UpgradeCount = 10;
+        public const int BaseUpgrades = 10;
+        public const int UpgradeCount = 14;
         public const int UpgradeMax = 5;
+        public const int EvoPassiveLv = 2;
+
+        public static int MaxLevel(int up) => up >= BaseUpgrades ? 1 : UpgradeMax;
 
         public static readonly EnemyDef[] Enemies =
         {
@@ -63,8 +83,54 @@ namespace LastEmber.Core
             new EnemyDef(7, 168, 7, 8, 1, 12, 1.2),     // Runner
             new EnemyDef(70, 56, 18, 20, 6, 60, 0.35),  // Tank
             new EnemyDef(20, 78, 8, 12, 3, 30, 1),      // Shooter
-            new EnemyDef(4200, 84, 26, 44, 0, 5000, 0), // Boss
+            new EnemyDef(5600, 84, 26, 44, 0, 5000, 0), // Boss
+            new EnemyDef(16, 122, 6, 12, 2, 25, 1.1),   // Bomber
         };
+
+        public static readonly Evolution[] Evolutions =
+        {
+            new Evolution(Up.SunLance, Up.Bolt, Up.Might),
+            new Evolution(Up.Tempest, Up.Orbit, Up.Swift),
+            new Evolution(Up.Bloom, Up.Nova, Up.Vital),
+            new Evolution(Up.Thunder, Up.Chain, Up.Haste),
+        };
+
+        // 자폭병
+        public const double BomberTrigger = 78;
+        public const int BomberFuse = 50;
+        public const double BomberRadius = 92;
+        public const double BomberDmgPlayer = 24;
+        public const double BomberDmgEnemy = 45;
+
+        // 엘리트
+        public const int EliteEvery = 45 * TickRate;
+        public const double EliteHpMul = 4;
+        public const double EliteRMul = 1.45;
+        public const double EliteSpeedMul = 1.2;
+        public const double EliteDmgMul = 1;
+        public const double EliteKbMul = 0.3;
+        public const int EliteXpMul = 3;
+        public const int EliteScore = 600;
+        public const double ElitePickR = 30;
+
+        // 보스 2페이즈 돌진
+        public const int ChargeCd = 300;
+        public const int ChargeWindup = 54;
+        public const int ChargeLock = 20;
+        public const int ChargeDash = 36;
+        public const double ChargeSpeed = 600;
+
+        public const double BossBlastMul = 0.25;
+
+        // 콤보
+        public const int ComboStep = 40;
+        public const int ComboMaxTier = 4;
+
+        public static int ComboTier(int combo)
+        {
+            int t = combo / ComboStep;
+            return t > ComboMaxTier ? ComboMaxTier : t;
+        }
 
         // 무기 레벨별 수치 (인덱스 = 레벨 - 1)
         public static readonly int[] BoltCd = { 26, 23, 21, 19, 16 };
@@ -91,5 +157,25 @@ namespace LastEmber.Core
         public static readonly double[] ChainDmg = { 15, 19, 23, 28, 34 };
         public const double ChainRange = 380;
         public const double ChainJumpRange = 175;
+
+        // 진화 무기
+        public const double SunLanceDmgMul = 1.25;
+        public const int SunLancePierceAdd = 2;
+        public const double SunLanceBlastR = 64;
+        public const double SunLanceBlastMul = 0.6;
+
+        public const int TempestBlades = 6;
+        public const double TempestRadius = 108;
+        public const double TempestDmgMul = 1.25;
+        public const double TempestEraseR = 24;
+
+        public const double BloomRadiusMul = 1.25;
+        public const double BloomHealPerHit = 0.8;
+        public const double BloomHealMax = 14;
+
+        public const int ThunderJumps = 12;
+        public const double ThunderDmgMul = 1.2;
+        public const double ThunderCdMul = 0.8;
+        public const int ThunderStun = 36;
     }
 }

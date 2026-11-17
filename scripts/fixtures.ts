@@ -5,8 +5,8 @@ import { writeFileSync } from 'node:fs';
 import { makeRng, nextU32 } from '../shared/rng.ts';
 import { playBot } from '../shared/test/helpers.ts';
 
-// 승리/사망, 짧은 판/긴 판이 섞이도록 고른 시드
-const seeds = [7919, 15838, 23757, 39595, 20260101, 764885647, 1, 2147483646];
+// 승리/사망, 짧은 판/긴 판이 섞이도록 고른 시드. 112·148은 생명 파동·폭풍 고리 진화가 나오는 판이다.
+const seeds = [7919, 15838, 23757, 39595, 20260101, 764885647, 1, 2147483646, 112, 148];
 
 const rng = makeRng(1);
 const out = {

@@ -5,7 +5,7 @@
 // 그래서 기록한 입력만 다시 넣으면 어디서든 같은 판이 재현된다.
 
 import { botInput } from '../../shared/bot.ts';
-import { DT, Kind, SIM_VERSION } from '../../shared/defs.ts';
+import { DT, Kind, SIM_VERSION, UPGRADE_META } from '../../shared/defs.ts';
 import { type InputFrame, InputRecorder, decodeFrame, encodeFrame, expandRuns } from '../../shared/input.ts';
 import { type SimEvent, type SimState, createSim, resultOf, step } from '../../shared/sim.ts';
 import * as api from './api.ts';
@@ -246,6 +246,11 @@ function handleEvents(events: SimEvent[]): void {
       case 'kill': {
         const boss = ev.kind === Kind.Boss;
         fx.burst(ev.x, ev.y, kindColor(ev.kind), boss ? 160 : 7 + ev.r / 2, boss ? 620 : 240, boss ? 7 : 4, boss ? 1.2 : 0.45);
+        if (ev.elite) {
+          fx.burst(ev.x, ev.y, '#ffd23f', 60, 420, 5, 0.8);
+          fx.ring(ev.x, ev.y, 200, '#ffd23f', 0.6);
+          if (!quiet) ui.toast('엘리트 처치 — 보물 상자를 주우세요');
+        }
         if (boss) {
           fx.ring(ev.x, ev.y, 520, '#ff4fd8', 0.9);
           fx.flash = 1;
@@ -263,7 +268,7 @@ function handleEvents(events: SimEvent[]): void {
         if (!quiet) sfx.enemyShoot();
         break;
       case 'nova':
-        fx.ring(ev.x, ev.y, ev.r, '#c79bff');
+        fx.ring(ev.x, ev.y, ev.r, ev.evo ? '#7dffa8' : '#c79bff');
         if (!quiet) {
           fx.addShake(3);
           sfx.nova();
@@ -272,6 +277,43 @@ function handleEvents(events: SimEvent[]): void {
       case 'chain':
         fx.bolt(ev.pts);
         if (!quiet) sfx.chain();
+        break;
+      case 'blast':
+        fx.ring(ev.x, ev.y, ev.r, ev.hostile ? '#ff6b3d' : '#ffd23f', 0.3);
+        fx.burst(ev.x, ev.y, ev.hostile ? '#ff6b3d' : '#ffe066', ev.hostile ? 26 : 8, ev.hostile ? 360 : 220, 4, 0.4);
+        if (!quiet) {
+          fx.addShake(ev.hostile ? 6 : 1.2);
+          sfx.blast();
+        }
+        break;
+      case 'chest':
+        fx.ring(p.x, p.y, 220, '#ffd23f', 0.6);
+        fx.burst(p.x, p.y, '#ffd23f', 40, 320, 4, 0.7);
+        if (!quiet) {
+          ui.toast('보물 상자 — 추가 강화!');
+          sfx.chest();
+        }
+        break;
+      case 'evolve':
+        fx.ring(p.x, p.y, 420, UPGRADE_META[ev.up].color, 0.9);
+        fx.burst(p.x, p.y, UPGRADE_META[ev.up].color, 120, 520, 5, 1);
+        if (!quiet) {
+          fx.flash = 0.7;
+          ui.toast(`★ 진화 — ${UPGRADE_META[ev.up].name}`);
+          sfx.evolve();
+        }
+        break;
+      case 'elite':
+        if (!quiet) {
+          ui.toast('⚠ 엘리트 출현 — 처치하면 보물 상자');
+          sfx.warn();
+        }
+        break;
+      case 'charge':
+        if (!quiet) sfx.warn();
+        break;
+      case 'combo':
+        if (!quiet) fx.text(p.x, p.y - 30, `콤보 ×${(2 + ev.tier) / 2}`, '#ffd23f', 20);
         break;
       case 'gem':
         if (!quiet) sfx.gem();
@@ -286,7 +328,8 @@ function handleEvents(events: SimEvent[]): void {
           fx.addShake(12);
           fx.hurt = 1;
           hitstop = 0.07; // 짧게 멈춰서 맞았다는 감각을 준다(시뮬레이션 틱 수에는 영향 없음)
-          fx.text(p.x, p.y - 16, `-${ev.dmg}`, '#ff5d73', 18);
+          fx.text(p.x, p.y - 16, `-${Math.round(ev.dmg)}`, '#ff5d73', 18);
+          if (ev.combo >= 40) ui.toast(`콤보 끊김 (${ev.combo})`);
           sfx.hurt();
         }
         break;
@@ -332,6 +375,7 @@ function onFinish(): void {
     ['생존 시간', ui.fmtTime(r.ticks * DT)],
     ['처치', r.kills.toLocaleString()],
     ['레벨', String(r.level)],
+    ['최고 콤보', sim.bestCombo.toLocaleString()],
   ];
 
   if (mode === 'replay') {

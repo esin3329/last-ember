@@ -10,13 +10,18 @@
 //     엔진마다 마지막 비트가 다를 수 있어서 쓰지 않고, 회전은 상수 회전 행렬로 처리한다.
 //  4. 엔티티 순회 순서를 항상 같게 유지한다(배열 순서, 그리드 삽입 순서).
 //  5. 연출용 이벤트(events)는 밖으로 내보내기만 하고 시뮬레이션에 영향을 주지 않는다.
+//
+// 폭발(자폭병, 태양창)은 즉시 처리하지 않고 큐(blasts)에 쌓았다가 무기·탄환 처리 뒤에
+// 한꺼번에 푼다. 폭발이 또 다른 자폭병을 터뜨려도 순회 중인 배열이 오염되지 않고,
+// 연쇄 순서가 큐 순서로 고정된다.
 
 import { type Rng, makeRng, nextFloat, nextInt } from './rng.ts';
 import type { InputFrame } from './input.ts';
 import {
-  ARENA, BOLT, BOSS_TICK, CHAIN, DASH_CD, DASH_SPEED, DASH_TICKS, DT, ENEMY_DEFS,
-  HIT_IFRAMES, Kind, MAX_TICKS, NOVA, ORBIT, PLAYER_HP, PLAYER_R, PLAYER_SPEED,
-  UPGRADE_COUNT, UPGRADE_MAX, Up,
+  ARENA, BASE_UPGRADES, BLOOM, BOSS_BLAST_MUL, BOLT, BOMBER, BOSS_CHARGE, BOSS_TICK, CHAIN, DASH_CD, DASH_SPEED,
+  DASH_TICKS, DT, ELITE, ENEMY_DEFS, EVOLUTIONS, EVO_PASSIVE_LV, HIT_IFRAMES, Kind, MAX_TICKS,
+  NOVA, ORBIT, PLAYER_HP, PLAYER_R, PLAYER_SPEED, SUNLANCE, TEMPEST, THUNDER, UPGRADE_COUNT,
+  UPGRADE_MAX, Up, comboTier,
 } from './defs.ts';
 
 export interface Enemy {
@@ -31,6 +36,11 @@ export interface Enemy {
   flash: number;
   orbitCd: number;
   mark: number;
+  elite: boolean;
+  stun: number; // 마비 남은 틱
+  mode: number; // 행동 상태 (자폭병: 1=점화, 보스: 1=조준 2=돌진)
+  timer: number;
+  ax: number; ay: number; // 보스 돌진 방향
   dead: boolean;
 }
 
@@ -48,6 +58,15 @@ export interface Gem {
   pulled: boolean;
 }
 
+export interface Chest {
+  x: number; y: number;
+}
+
+export interface Blast {
+  x: number; y: number; r: number; dmg: number;
+  hurtsPlayer: boolean;
+}
+
 export interface Player {
   x: number; y: number; px: number; py: number;
   fx: number; fy: number; // 바라보는 방향
@@ -59,15 +78,21 @@ export interface Player {
 
 export type SimEvent =
   | { t: 'hit'; x: number; y: number; dmg: number }
-  | { t: 'kill'; x: number; y: number; kind: Kind; r: number }
+  | { t: 'kill'; x: number; y: number; kind: Kind; r: number; elite: boolean }
   | { t: 'shoot' }
   | { t: 'enemyShoot'; x: number; y: number }
-  | { t: 'nova'; x: number; y: number; r: number }
-  | { t: 'chain'; pts: number[] }
+  | { t: 'nova'; x: number; y: number; r: number; evo: boolean }
+  | { t: 'chain'; pts: number[]; evo: boolean }
+  | { t: 'blast'; x: number; y: number; r: number; hostile: boolean }
   | { t: 'gem' }
+  | { t: 'chest' }
   | { t: 'dash' }
-  | { t: 'playerHit'; dmg: number }
+  | { t: 'playerHit'; dmg: number; combo: number }
+  | { t: 'combo'; tier: number }
   | { t: 'levelup' }
+  | { t: 'evolve'; up: number }
+  | { t: 'elite' }
+  | { t: 'charge' }
   | { t: 'bossSpawn' }
   | { t: 'wave' }
   | { t: 'win' }
@@ -86,6 +111,8 @@ export interface SimState {
   enemies: Enemy[];
   bullets: Bullet[];
   gems: Gem[];
+  chests: Chest[];
+  blasts: Blast[];
   boltCd: number; novaCd: number; chainCd: number;
   orbX: number; orbY: number; // 공전 칼날 기준 방향 벡터
   spawnAcc: number;
@@ -93,6 +120,8 @@ export interface SimState {
   bossId: number;
   kills: number;
   score: number;
+  combo: number; // 마지막 피격 이후 처치 수
+  bestCombo: number;
   nextId: number;
   markSeq: number;
   // 파생 스탯
@@ -104,6 +133,7 @@ export interface SimState {
   gridHead: Int32Array;
   gridNext: Int32Array;
   scratch: number[];
+  scratch2: number[];
 }
 
 const CELL = 64;
@@ -119,6 +149,7 @@ const ROT_ORBIT: readonly [number, number] = [0.9975640502598242, 0.069756473744
 const ROT_22: readonly [number, number] = [0.9238795325112867, 0.3826834323650898]; // 22.5도
 const ROT_11: readonly [number, number] = [0.9807852804032304, 0.19509032201612825]; // 11.25도
 const ROT_120: readonly [number, number] = [-0.5, 0.8660254037844386];
+const ROT_60: readonly [number, number] = [0.5, 0.8660254037844386];
 
 export function xpForLevel(level: number): number {
   return 4 + level * 3 + ((level * level) >> 2);
@@ -145,6 +176,8 @@ export function createSim(seed: number, emit = true): SimState {
     enemies: [],
     bullets: [],
     gems: [],
+    chests: [],
+    blasts: [],
     boltCd: 20, novaCd: 60, chainCd: 40,
     orbX: 1, orbY: 0,
     spawnAcc: 0,
@@ -152,6 +185,8 @@ export function createSim(seed: number, emit = true): SimState {
     bossId: -1,
     kills: 0,
     score: 0,
+    combo: 0,
+    bestCombo: 0,
     nextId: 1,
     markSeq: 0,
     dmgMul: 1, cdMul: 1, speedMul: 1, magnet: 90, regen: 0,
@@ -160,6 +195,7 @@ export function createSim(seed: number, emit = true): SimState {
     gridHead: new Int32Array(GW * GW),
     gridNext: new Int32Array(MAX_ENEMIES),
     scratch: [],
+    scratch2: [],
   };
   recomputeStats(s);
   return s;
@@ -209,6 +245,7 @@ export function step(s: SimState, inp: InputFrame): void {
   touchPlayer(s);
   fireWeapons(s);
   updateBullets(s);
+  resolveBlasts(s);
   updateGems(s);
   removeDead(s);
 
@@ -273,7 +310,8 @@ function hurtPlayer(s: SimState, dmg: number): void {
   const p = s.player;
   p.hp -= dmg;
   p.iframes = HIT_IFRAMES;
-  if (s.emit) s.events.push({ t: 'playerHit', dmg });
+  if (s.emit) s.events.push({ t: 'playerHit', dmg, combo: s.combo });
+  s.combo = 0;
 }
 
 // ───────────────────────── 스폰 ─────────────────────────
@@ -306,7 +344,9 @@ function spawnEnemy(s: SimState, kind: Kind, x: number, y: number, cap: number):
   const e: Enemy = {
     id: s.nextId++, kind, x, y, px: x, py: y, kx: 0, ky: 0,
     hp, maxHp: hp, r: def.r, speed: def.speed, dmg: def.dmg,
-    cd: 90, cd2: 300, flash: 0, orbitCd: 0, mark: 0, dead: false,
+    cd: 90, cd2: 300, flash: 0, orbitCd: 0, mark: 0,
+    elite: false, stun: 0, mode: 0, timer: 0, ax: 0, ay: 0,
+    dead: false,
   };
   s.enemies.push(e);
   return e;
@@ -328,10 +368,12 @@ function pickKind(s: SimState, sec: number): Kind {
   const roll = nextFloat(s.rng);
   const tank = sec > 80 ? 0.1 : 0;
   const shooter = sec > 45 ? 0.14 : 0;
+  const bomber = sec > 60 ? 0.08 : 0;
   const runner = sec > 15 ? 0.26 : 0;
   if (roll < tank) return Kind.Tank;
   if (roll < tank + shooter) return Kind.Shooter;
-  if (roll < tank + shooter + runner) return Kind.Runner;
+  if (roll < tank + shooter + bomber) return Kind.Bomber;
+  if (roll < tank + shooter + bomber + runner) return Kind.Runner;
   return Kind.Chaser;
 }
 
@@ -343,6 +385,7 @@ function spawnDirector(s: SimState): void {
     if (boss) {
       s.bossId = boss.id;
       boss.cd = 120;
+      boss.timer = BOSS_CHARGE.cd;
     }
     if (s.emit) s.events.push({ t: 'bossSpawn' });
   }
@@ -368,6 +411,20 @@ function spawnDirector(s: SimState): void {
     }
     if (s.emit) s.events.push({ t: 'wave' });
   }
+
+  // 45초마다 엘리트. 보스전에는 나오지 않는다.
+  if (!s.bossSpawned && s.tick % ELITE.every === 0) {
+    const e = spawnAtRing(s, Kind.Tank, MAX_ENEMIES - 1);
+    if (e) {
+      e.elite = true;
+      e.hp *= ELITE.hpMul;
+      e.maxHp = e.hp;
+      e.r *= ELITE.rMul;
+      e.speed *= ELITE.speedMul;
+      e.dmg *= ELITE.dmgMul;
+      if (s.emit) s.events.push({ t: 'elite' });
+    }
+  }
 }
 
 // ───────────────────────── 적 ─────────────────────────
@@ -389,6 +446,16 @@ function updateEnemies(s: SimState): void {
     e.py = e.y;
     if (e.flash > 0) e.flash--;
     if (e.orbitCd > 0) e.orbitCd--;
+
+    // 마비: 넉백만 받고 아무 행동도 하지 않는다 (자폭 도화선도 멈춘다).
+    if (e.stun > 0) {
+      e.stun--;
+      e.x = clamp(e.x + e.kx * DT, e.r, ARENA - e.r);
+      e.y = clamp(e.y + e.ky * DT, e.r, ARENA - e.r);
+      e.kx *= 0.86;
+      e.ky *= 0.86;
+      continue;
+    }
 
     let dx = p.x - e.x;
     let dy = p.y - e.y;
@@ -412,6 +479,21 @@ function updateEnemies(s: SimState): void {
         e.cd = 130;
         hostileBullet(s, e.x, e.y, dx, dy, 210, e.dmg);
         if (s.emit) s.events.push({ t: 'enemyShoot', x: e.x, y: e.y });
+      }
+    } else if (e.kind === Kind.Bomber) {
+      if (e.mode === 0 && d < BOMBER.trigger) {
+        e.mode = 1;
+        e.timer = BOMBER.fuse;
+      }
+      if (e.mode === 1) {
+        // 점화 중에는 거의 멈춰서 폭발 범위를 보여 준다.
+        mx *= 0.15;
+        my *= 0.15;
+        if (--e.timer <= 0) {
+          e.dead = true; // 자폭은 처치로 치지 않는다 (점수·경험치 없음)
+          s.blasts.push({ x: e.x, y: e.y, r: BOMBER.radius, dmg: BOMBER.dmgEnemy, hurtsPlayer: true });
+          continue;
+        }
       }
     } else if (e.kind === Kind.Boss) {
       const enraged = e.hp < e.maxHp * 0.5;
@@ -443,6 +525,34 @@ function updateEnemies(s: SimState): void {
       if (enraged) {
         mx *= 1.35;
         my *= 1.35;
+        // 2페이즈: 대기 → 조준(예고) → 돌진
+        if (e.mode === 0) {
+          if (--e.timer <= 0) {
+            e.mode = 1;
+            e.timer = BOSS_CHARGE.windup;
+            e.ax = dx;
+            e.ay = dy;
+            if (s.emit) s.events.push({ t: 'charge' });
+          }
+        } else if (e.mode === 1) {
+          mx = 0;
+          my = 0;
+          if (e.timer > BOSS_CHARGE.lock) {
+            e.ax = dx;
+            e.ay = dy;
+          }
+          if (--e.timer <= 0) {
+            e.mode = 2;
+            e.timer = BOSS_CHARGE.dash;
+          }
+        } else {
+          mx = (e.ax * BOSS_CHARGE.speed) / e.speed;
+          my = (e.ay * BOSS_CHARGE.speed) / e.speed;
+          if (--e.timer <= 0) {
+            e.mode = 0;
+            e.timer = BOSS_CHARGE.cd;
+          }
+        }
       }
     }
 
@@ -561,7 +671,7 @@ function damageEnemy(s: SimState, e: Enemy, dmg: number, kx: number, ky: number)
   if (e.dead) return;
   e.hp -= dmg;
   e.flash = 5;
-  const kb = ENEMY_DEFS[e.kind].kb;
+  const kb = ENEMY_DEFS[e.kind].kb * (e.elite ? ELITE.kbMul : 1);
   e.kx += kx * kb;
   e.ky += ky * kb;
   if (s.emit) s.events.push({ t: 'hit', x: e.x, y: e.y, dmg });
@@ -570,9 +680,21 @@ function damageEnemy(s: SimState, e: Enemy, dmg: number, kx: number, ky: number)
   e.dead = true;
   s.kills++;
   const def = ENEMY_DEFS[e.kind];
-  s.score += def.score;
-  if (def.xp > 0) dropGem(s, e.x, e.y, def.xp);
-  if (s.emit) s.events.push({ t: 'kill', x: e.x, y: e.y, kind: e.kind, r: e.r });
+  // 콤보 배율: 정수 연산으로만 계산 (tier 0~4 → 1.0~3.0배)
+  const tier = comboTier(s.combo);
+  const base = e.elite ? ELITE.score : def.score;
+  s.score += Math.floor((base * (2 + tier)) / 2);
+  s.combo++;
+  if (s.combo > s.bestCombo) s.bestCombo = s.combo;
+  if (s.emit && comboTier(s.combo) > tier) s.events.push({ t: 'combo', tier: tier + 1 });
+
+  if (def.xp > 0) dropGem(s, e.x, e.y, e.elite ? def.xp * ELITE.xpMul : def.xp);
+  if (e.elite) s.chests.push({ x: e.x, y: e.y });
+  // 먼저 잡은 자폭병은 적에게만 피해를 주는 폭발로 바뀐다 (연쇄 유도).
+  if (e.kind === Kind.Bomber) {
+    s.blasts.push({ x: e.x, y: e.y, r: BOMBER.radius, dmg: BOMBER.dmgEnemy * s.dmgMul, hurtsPlayer: false });
+  }
+  if (s.emit) s.events.push({ t: 'kill', x: e.x, y: e.y, kind: e.kind, r: e.r, elite: e.elite });
   if (e.kind === Kind.Boss) s.phase = 'won';
 }
 
@@ -583,6 +705,34 @@ function removeDead(s: SimState): void {
     if (!es[i].dead) es[w++] = es[i];
   }
   es.length = w;
+}
+
+/** 쌓인 폭발을 순서대로 처리한다. 처리 중 새로 생긴 폭발(연쇄)도 같은 틱에 이어서 푼다. */
+function resolveBlasts(s: SimState): void {
+  const bl = s.blasts;
+  const p = s.player;
+  const ids = s.scratch2;
+  for (let i = 0; i < bl.length; i++) {
+    const b = bl[i];
+    if (b.hurtsPlayer && p.iframes === 0 && p.dashT === 0) {
+      const dx = p.x - b.x;
+      const dy = p.y - b.y;
+      const rr = b.r + PLAYER_R;
+      if (dx * dx + dy * dy < rr * rr) hurtPlayer(s, BOMBER.dmgPlayer);
+    }
+    // damageEnemy가 다시 폭발을 큐에 넣을 수 있으므로 쿼리 결과를 따로 복사해 둔다.
+    const n = query(s, b.x, b.y, b.r);
+    for (let k = 0; k < n; k++) ids[k] = s.scratch[k];
+    for (let k = 0; k < n; k++) {
+      const e = s.enemies[ids[k]];
+      const dx = e.x - b.x;
+      const dy = e.y - b.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      damageEnemy(s, e, e.kind === Kind.Boss ? b.dmg * BOSS_BLAST_MUL : b.dmg, (dx / d) * 220, (dy / d) * 220);
+    }
+    if (s.emit) s.events.push({ t: 'blast', x: b.x, y: b.y, r: b.r, hostile: b.hurtsPlayer });
+  }
+  bl.length = 0;
 }
 
 // ───────────────────────── 무기 ─────────────────────────
@@ -615,25 +765,39 @@ function playerBullet(s: SimState, dx: number, dy: number, dmg: number, pierce: 
   });
 }
 
+/** 공전 칼날 개수 (진화하면 6개). 렌더러도 같은 값을 쓴다. */
+export function orbitCount(s: SimState): number {
+  const lv = s.levels[Up.Orbit];
+  if (lv === 0) return 0;
+  return s.levels[Up.Tempest] > 0 ? TEMPEST.blades : ORBIT.blades[lv - 1];
+}
+
+export function orbitRadius(s: SimState): number {
+  const lv = s.levels[Up.Orbit];
+  if (lv === 0) return 0;
+  return s.levels[Up.Tempest] > 0 ? TEMPEST.radius : ORBIT.radius[lv - 1];
+}
+
 function fireWeapons(s: SimState): void {
   const p = s.player;
   const L = s.levels;
 
-  // 불씨 탄환
+  // 불씨 탄환 (진화: 태양창)
   if (s.boltCd > 0) s.boltCd--;
   if (s.boltCd === 0) {
     const target = nearestEnemy(s, p.x, p.y, BOLT.range, -1);
     if (target) {
       const lv = L[Up.Bolt] - 1;
+      const evo = L[Up.SunLance] > 0;
       s.boltCd = cdTicks(s, BOLT.cd[lv]);
       const dx = target.x - p.x;
       const dy = target.y - p.y;
       const d = Math.sqrt(dx * dx + dy * dy) || 1;
       const ux = dx / d;
       const uy = dy / d;
-      const dmg = BOLT.dmg[lv] * s.dmgMul;
+      const dmg = BOLT.dmg[lv] * s.dmgMul * (evo ? SUNLANCE.dmgMul : 1);
       const count = BOLT.count[lv];
-      const pierce = BOLT.pierce[lv];
+      const pierce = BOLT.pierce[lv] + (evo ? SUNLANCE.pierceAdd : 0);
       // 부채꼴: 방향 벡터에 수직 성분을 더해서 만든다.
       if (count === 1) {
         playerBullet(s, ux, uy, dmg, pierce);
@@ -649,7 +813,7 @@ function fireWeapons(s: SimState): void {
     }
   }
 
-  // 공전 칼날
+  // 공전 칼날 (진화: 폭풍 고리)
   {
     const nx = s.orbX * ROT_ORBIT[0] - s.orbY * ROT_ORBIT[1];
     const ny = s.orbX * ROT_ORBIT[1] + s.orbY * ROT_ORBIT[0];
@@ -659,18 +823,33 @@ function fireWeapons(s: SimState): void {
   }
   if (L[Up.Orbit] > 0) {
     const lv = L[Up.Orbit] - 1;
-    const blades = ORBIT.blades[lv];
-    const radius = ORBIT.radius[lv];
-    const dmg = ORBIT.dmg[lv] * s.dmgMul;
+    const evo = L[Up.Tempest] > 0;
+    const blades = orbitCount(s);
+    const radius = orbitRadius(s);
+    const dmg = ORBIT.dmg[lv] * s.dmgMul * (evo ? TEMPEST.dmgMul : 1);
+    const erase2 = TEMPEST.eraseR * TEMPEST.eraseR;
     let bx = s.orbX;
     let by = s.orbY;
     for (let k = 0; k < blades; k++) {
-      const n = query(s, p.x + bx * radius, p.y + by * radius, ORBIT.bladeR);
+      const cx = p.x + bx * radius;
+      const cy = p.y + by * radius;
+      const n = query(s, cx, cy, ORBIT.bladeR);
       for (let i = 0; i < n; i++) {
         const e = s.enemies[s.scratch[i]];
         if (e.orbitCd > 0) continue;
         e.orbitCd = ORBIT.hitCd;
         damageEnemy(s, e, dmg, bx * 160, by * 160);
+      }
+      if (evo) {
+        // 칼날에 닿은 적 탄환은 다음 탄환 갱신에서 사라진다.
+        const bs = s.bullets;
+        for (let j = 0; j < bs.length; j++) {
+          const b = bs[j];
+          if (!b.hostile) continue;
+          const ex = b.x - cx;
+          const ey = b.y - cy;
+          if (ex * ex + ey * ey < erase2) b.life = 1;
+        }
       }
       const nb = orbitNext(bx, by, blades);
       bx = nb[0];
@@ -678,13 +857,14 @@ function fireWeapons(s: SimState): void {
     }
   }
 
-  // 섬광 파동
+  // 섬광 파동 (진화: 생명 파동)
   if (L[Up.Nova] > 0) {
     if (s.novaCd > 0) s.novaCd--;
     if (s.novaCd === 0) {
       const lv = L[Up.Nova] - 1;
+      const evo = L[Up.Bloom] > 0;
       s.novaCd = cdTicks(s, NOVA.cd[lv]);
-      const r = NOVA.radius[lv];
+      const r = NOVA.radius[lv] * (evo ? BLOOM.radiusMul : 1);
       const dmg = NOVA.dmg[lv] * s.dmgMul;
       const n = query(s, p.x, p.y, r);
       for (let i = 0; i < n; i++) {
@@ -694,31 +874,37 @@ function fireWeapons(s: SimState): void {
         const d = Math.sqrt(dx * dx + dy * dy) || 1;
         damageEnemy(s, e, dmg, (dx / d) * NOVA.kb, (dy / d) * NOVA.kb);
       }
-      if (s.emit) s.events.push({ t: 'nova', x: p.x, y: p.y, r });
+      if (evo && n > 0) {
+        const heal = n * BLOOM.healPerHit;
+        p.hp = Math.min(p.maxHp, p.hp + (heal < BLOOM.healMax ? heal : BLOOM.healMax));
+      }
+      if (s.emit) s.events.push({ t: 'nova', x: p.x, y: p.y, r, evo });
     }
   }
 
-  // 연쇄 번개
+  // 연쇄 번개 (진화: 뇌신)
   if (L[Up.Chain] > 0) {
     if (s.chainCd > 0) s.chainCd--;
     if (s.chainCd === 0) {
       const lv = L[Up.Chain] - 1;
+      const evo = L[Up.Thunder] > 0;
       const mark = ++s.markSeq;
       let cur = nearestEnemy(s, p.x, p.y, CHAIN.range, mark);
       if (cur) {
-        s.chainCd = cdTicks(s, CHAIN.cd[lv]);
-        const dmg = CHAIN.dmg[lv] * s.dmgMul;
+        s.chainCd = cdTicks(s, CHAIN.cd[lv] * (evo ? THUNDER.cdMul : 1));
+        const dmg = CHAIN.dmg[lv] * s.dmgMul * (evo ? THUNDER.dmgMul : 1);
         const pts: number[] | null = s.emit ? [p.x, p.y] : null;
-        let hops = CHAIN.jumps[lv] + 1;
+        let hops = (evo ? THUNDER.jumps : CHAIN.jumps[lv]) + 1;
         while (cur && hops-- > 0) {
           cur.mark = mark;
           if (pts) pts.push(cur.x, cur.y);
           const cx = cur.x;
           const cy = cur.y;
+          if (evo && cur.kind !== Kind.Boss) cur.stun = THUNDER.stun;
           damageEnemy(s, cur, dmg, 0, 0);
           cur = nearestEnemy(s, cx, cy, CHAIN.jumpRange, mark);
         }
-        if (pts) s.events.push({ t: 'chain', pts });
+        if (pts) s.events.push({ t: 'chain', pts, evo });
       }
     }
   }
@@ -733,6 +919,9 @@ function orbitNext(x: number, y: number, blades: number): [number, number] {
   } else if (blades === 3) {
     orbTmp[0] = x * ROT_120[0] - y * ROT_120[1];
     orbTmp[1] = x * ROT_120[1] + y * ROT_120[0];
+  } else if (blades === 6) {
+    orbTmp[0] = x * ROT_60[0] - y * ROT_60[1];
+    orbTmp[1] = x * ROT_60[1] + y * ROT_60[0];
   } else {
     orbTmp[0] = -y;
     orbTmp[1] = x;
@@ -742,9 +931,7 @@ function orbitNext(x: number, y: number, blades: number): [number, number] {
 
 /** 렌더러가 칼날 위치를 그릴 때 쓰는 헬퍼 (시뮬레이션과 같은 계산). */
 export function orbitBlades(s: SimState, out: number[]): number {
-  const lv = s.levels[Up.Orbit];
-  if (lv === 0) return 0;
-  const blades = ORBIT.blades[lv - 1];
+  const blades = orbitCount(s);
   let bx = s.orbX;
   let by = s.orbY;
   for (let k = 0; k < blades; k++) {
@@ -757,11 +944,12 @@ export function orbitBlades(s: SimState, out: number[]): number {
   return blades;
 }
 
-// ───────────────────────── 탄환 / 경험치 ─────────────────────────
+// ───────────────────────── 탄환 / 경험치 / 상자 ─────────────────────────
 
 function updateBullets(s: SimState): void {
   const p = s.player;
   const bs = s.bullets;
+  const lance = s.levels[Up.SunLance] > 0;
   let w = 0;
   for (let i = 0; i < bs.length; i++) {
     const b = bs[i];
@@ -784,6 +972,7 @@ function updateBullets(s: SimState): void {
         const e = s.enemies[s.scratch[k]];
         if (e.id === b.lastHit) continue;
         b.lastHit = e.id;
+        if (lance) s.blasts.push({ x: e.x, y: e.y, r: SUNLANCE.blastR, dmg: b.dmg * SUNLANCE.blastMul, hurtsPlayer: false });
         damageEnemy(s, e, b.dmg, b.vx * 0.22, b.vy * 0.22);
         if (b.pierce-- <= 0) alive = false;
         break;
@@ -828,6 +1017,22 @@ function updateGems(s: SimState): void {
     gs[w++] = g;
   }
   gs.length = w;
+
+  // 보물 상자: 자석에 끌려오지 않으므로 직접 가서 주워야 한다 (위험 감수 보상).
+  const cs = s.chests;
+  w = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i];
+    const dx = p.x - c.x;
+    const dy = p.y - c.y;
+    if (dx * dx + dy * dy < ELITE.pickR * ELITE.pickR) {
+      s.pendingLevels++;
+      if (s.emit) s.events.push({ t: 'chest' });
+      continue;
+    }
+    cs[w++] = c;
+  }
+  cs.length = w;
 }
 
 function gainXp(s: SimState, value: number): void {
@@ -844,27 +1049,41 @@ function gainXp(s: SimState, value: number): void {
 
 // ───────────────────────── 레벨업 ─────────────────────────
 
+/** 진화 조건(무기 MAX + 짝 패시브 Lv2 이상)을 만족하고 아직 진화하지 않았는지. */
+export function canEvolve(levels: readonly number[], evo: number): boolean {
+  for (const ev of EVOLUTIONS) {
+    if (ev.evo !== evo) continue;
+    return levels[evo] === 0 && levels[ev.weapon] >= UPGRADE_MAX && levels[ev.passive] >= EVO_PASSIVE_LV;
+  }
+  return false;
+}
+
 function rollChoices(s: SimState): void {
+  // 진화 가능한 것은 무작위 없이 앞자리에 고정으로 보여 준다.
+  const choices: number[] = [];
+  for (let i = 0; i < EVOLUTIONS.length && choices.length < 3; i++) {
+    if (canEvolve(s.levels, EVOLUTIONS[i].evo)) choices.push(EVOLUTIONS[i].evo);
+  }
   const pool: number[] = [];
-  for (let i = 0; i < UPGRADE_COUNT; i++) {
+  for (let i = 0; i < BASE_UPGRADES; i++) {
     if (s.levels[i] < UPGRADE_MAX) pool.push(i);
   }
-  if (pool.length === 0) {
+  if (choices.length === 0 && pool.length === 0) {
     // 전부 최대 레벨이면 선택 없이 회복으로 대체
     s.player.hp = Math.min(s.player.maxHp, s.player.hp + 15 * s.pendingLevels);
     s.pendingLevels = 0;
     s.phase = 'playing';
     return;
   }
-  const k = Math.min(3, pool.length);
+  const k = Math.min(3 - choices.length, pool.length);
   for (let i = 0; i < k; i++) {
     const j = i + nextInt(s.rng, pool.length - i);
     const t = pool[i];
     pool[i] = pool[j];
     pool[j] = t;
+    choices.push(pool[i]);
   }
-  pool.length = k;
-  s.choices = pool;
+  s.choices = choices;
   s.phase = 'levelup';
   if (s.emit) s.events.push({ t: 'levelup' });
 }
@@ -875,6 +1094,7 @@ function applyUpgrade(s: SimState, idx: number): void {
     s.player.maxHp += 20;
     s.player.hp = Math.min(s.player.maxHp, s.player.hp + 20);
   }
+  if (idx >= BASE_UPGRADES && s.emit) s.events.push({ t: 'evolve', up: idx });
   recomputeStats(s);
 }
 
@@ -904,6 +1124,8 @@ export function checksum(s: SimState): number {
   mix(Math.floor(s.player.x * 1000));
   mix(Math.floor(s.player.y * 1000));
   mix(s.enemies.length);
+  mix(s.bestCombo);
+  mix(s.chests.length);
   mix(s.rng.s);
   return h >>> 0;
 }

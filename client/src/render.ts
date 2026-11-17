@@ -5,11 +5,12 @@
 // 드로우 콜을 줄이기 위해 적은 종류별로 한 경로(Path)에 모아 한 번에 채우고,
 // 화면 밖 개체는 그리지 않는다.
 
-import { ARENA, Kind, ORBIT, PLAYER_R, Up } from '../../shared/defs.ts';
-import { type SimState, orbitBlades } from '../../shared/sim.ts';
+import { ARENA, BOMBER, BOSS_CHARGE, Kind, PLAYER_R, Up } from '../../shared/defs.ts';
+import { type SimState, orbitBlades, orbitRadius } from '../../shared/sim.ts';
 import type { Fx } from './fx.ts';
 
-const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8'];
+const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8', '#ffe14d'];
+const ELITE_COLOR = '#ffd23f';
 export const kindColor = (k: number): string => KIND_COLOR[k];
 
 function polygon(n: number, inner = 1): number[] {
@@ -29,6 +30,7 @@ const SHAPES: number[][] = [
   polygon(6), // Tank: 육각형
   [1.25, 0, 0, 1.25, -1.25, 0, 0, -1.25], // Shooter: 마름모
   polygon(16, 0.72), // Boss: 별
+  polygon(12, 0.62), // Bomber: 가시 달린 기뢰
 ];
 
 function glowSprite(color: string, size = 64): HTMLCanvasElement {
@@ -62,6 +64,8 @@ export class Renderer {
   private glowHostile = glowSprite('#ff3355');
   private glowBlade = glowSprite('#7fe3ff');
   private glowGem = glowSprite('#5df2c0', 32);
+  private glowElite = glowSprite(ELITE_COLOR, 128);
+  private glowLance = glowSprite('#ffd23f');
   private blades: number[] = [];
   drawn = 0; // 마지막 프레임에 실제로 그린 적 수 (디버그 표시용)
 
@@ -125,6 +129,39 @@ export class Renderer {
     ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, ARENA, ARENA);
 
+    // ── 위험 예고 (바닥에 깔리는 표시) ──
+    for (const e of s.enemies) {
+      if (e.x < vx0 - 200 || e.x > vx1 + 200 || e.y < vy0 - 200 || e.y > vy1 + 200) continue;
+      const x = e.px + (e.x - e.px) * a;
+      const y = e.py + (e.y - e.py) * a;
+      if (e.kind === Kind.Bomber && e.mode === 1) {
+        // 도화선: 폭발 범위를 채워 가며, 끝에 가까울수록 빠르게 깜빡인다
+        const t = 1 - e.timer / BOMBER.fuse;
+        const blink = Math.sin(o.time * (10 + t * 30)) > 0 ? 1 : 0.6;
+        ctx.beginPath();
+        ctx.arc(x, y, BOMBER.radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,90,40,${(0.08 + t * 0.22) * blink})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255,120,60,${0.5 + t * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, BOMBER.radius * t, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,140,60,0.18)';
+        ctx.fill();
+      } else if (e.kind === Kind.Boss && e.mode === 1) {
+        // 돌진 예고선: 조준이 고정되면 진하게 바뀐다
+        const locked = e.timer <= BOSS_CHARGE.lock;
+        const len = BOSS_CHARGE.speed * BOSS_CHARGE.dash * (1 / 60);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.transform(e.ax, e.ay, -e.ay, e.ax, 0, 0);
+        ctx.fillStyle = locked ? 'rgba(255,60,120,0.32)' : `rgba(255,80,200,${0.1 + 0.08 * Math.sin(o.time * 20)})`;
+        ctx.fillRect(0, -e.r, len, e.r * 2);
+        ctx.restore();
+      }
+    }
+
     // ── 가산 합성 레이어: 빛 번짐 ──
     ctx.globalCompositeOperation = 'lighter';
 
@@ -143,10 +180,29 @@ export class Renderer {
       const y = e.py + (e.y - e.py) * a;
       const sz = e.r * 4.6;
       ctx.drawImage(this.glows[e.kind], x - sz / 2, y - sz / 2, sz, sz);
+      if (e.elite) {
+        const es = e.r * (5.5 + 0.6 * Math.sin(o.time * 5));
+        ctx.drawImage(this.glowElite, x - es / 2, y - es / 2, es, es);
+      }
       this.drawn++;
     }
 
-    // 플레이어 탄환: 진행 방향 반대로 꼬리를 그린다
+    // 보물 상자
+    for (const c of s.chests) {
+      const sz = 70 + 10 * Math.sin(o.time * 4);
+      ctx.drawImage(this.glowElite, c.x - sz / 2, c.y - sz / 2, sz, sz);
+    }
+
+    // 플레이어 탄환: 진행 방향 반대로 꼬리를 그린다 (태양창은 빛을 두른다)
+    const lance = s.levels[Up.SunLance] > 0;
+    if (lance) {
+      for (const b of s.bullets) {
+        if (b.hostile) continue;
+        const x = b.px + (b.x - b.px) * a;
+        const y = b.py + (b.y - b.py) * a;
+        ctx.drawImage(this.glowLance, x - 16, y - 16, 32, 32);
+      }
+    }
     ctx.beginPath();
     for (const b of s.bullets) {
       if (b.hostile) continue;
@@ -155,8 +211,8 @@ export class Renderer {
       ctx.moveTo(x - b.vx * 0.035, y - b.vy * 0.035);
       ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = '#ffd27a';
-    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = lance ? '#fff3b0' : '#ffd27a';
+    ctx.lineWidth = lance ? 5 : 3.5;
     ctx.lineCap = 'round';
     ctx.stroke();
 
@@ -172,11 +228,12 @@ export class Renderer {
 
     // 공전 칼날
     const bladeCount = orbitBlades(s, this.blades);
+    const radius = orbitRadius(s);
+    const tempest = s.levels[Up.Tempest] > 0;
     if (bladeCount > 0 && o.showPlayer) {
-      const radius = ORBIT.radius[s.levels[Up.Orbit] - 1];
       ctx.beginPath();
       ctx.arc(px, py, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(127,227,255,0.10)';
+      ctx.strokeStyle = tempest ? 'rgba(79,217,255,0.28)' : 'rgba(127,227,255,0.10)';
       ctx.lineWidth = 2;
       ctx.stroke();
       for (let i = 0; i < bladeCount; i++) {
@@ -297,16 +354,46 @@ export class Renderer {
       }
     }
 
-    // 체력이 깎인 탱크는 머리 위에 체력 바
+    // 엘리트 금테, 마비 표시, 체력이 깎인 탱크·엘리트의 체력 바
     for (const e of s.enemies) {
-      if (e.kind !== Kind.Tank || e.hp >= e.maxHp) continue;
       if (e.x < vx0 || e.x > vx1 || e.y < vy0 || e.y > vy1) continue;
       const x = e.px + (e.x - e.px) * a;
       const y = e.py + (e.y - e.py) * a;
+      if (e.elite) {
+        ctx.beginPath();
+        ctx.arc(x, y, e.r + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = ELITE_COLOR;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+      if (e.stun > 0) {
+        ctx.beginPath();
+        ctx.arc(x, y, e.r + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,247,176,0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (e.kind !== Kind.Tank || e.hp >= e.maxHp) continue;
+      const w = e.elite ? 60 : 36;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(x - 18, y - e.r - 10, 36, 4);
-      ctx.fillStyle = KIND_COLOR[Kind.Tank];
-      ctx.fillRect(x - 18, y - e.r - 10, 36 * Math.max(0, e.hp / e.maxHp), 4);
+      ctx.fillRect(x - w / 2, y - e.r - 12, w, e.elite ? 6 : 4);
+      ctx.fillStyle = e.elite ? ELITE_COLOR : KIND_COLOR[Kind.Tank];
+      ctx.fillRect(x - w / 2, y - e.r - 12, w * Math.max(0, e.hp / e.maxHp), e.elite ? 6 : 4);
+    }
+
+    // 보물 상자 본체
+    for (const c of s.chests) {
+      const bob = Math.sin(o.time * 4) * 2;
+      ctx.fillStyle = '#5a3b10';
+      ctx.fillRect(c.x - 12, c.y - 9 + bob, 24, 18);
+      ctx.strokeStyle = ELITE_COLOR;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(c.x - 12, c.y - 9 + bob, 24, 18);
+      ctx.fillStyle = ELITE_COLOR;
+      ctx.fillRect(c.x - 12, c.y - 2 + bob, 24, 3);
+      ctx.fillRect(c.x - 2.5, c.y - 4 + bob, 5, 7);
     }
 
     ctx.beginPath();
@@ -321,7 +408,6 @@ export class Renderer {
     ctx.fill();
 
     if (bladeCount > 0 && o.showPlayer) {
-      const radius = ORBIT.radius[s.levels[Up.Orbit] - 1];
       ctx.beginPath();
       for (let i = 0; i < bladeCount; i++) {
         const bx = px + this.blades[i * 2] * radius;
@@ -329,7 +415,7 @@ export class Renderer {
         ctx.moveTo(bx + 7, by);
         ctx.arc(bx, by, 7, 0, Math.PI * 2);
       }
-      ctx.fillStyle = '#e8fbff';
+      ctx.fillStyle = tempest ? '#b8f3ff' : '#e8fbff';
       ctx.fill();
     }
 

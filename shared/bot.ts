@@ -5,11 +5,14 @@
 // 시뮬레이션 상태만 읽고 입력을 만들 뿐이라 검증 규칙(결정론)과는 무관하다.
 
 import type { InputFrame } from './input.ts';
-import { ARENA, Up } from './defs.ts';
+import { ARENA, BOMBER, Kind, Up } from './defs.ts';
 import type { SimState } from './sim.ts';
 
-// 봇이 선호하는 업그레이드 순서
-const PRIORITY = [Up.Orbit, Up.Bolt, Up.Nova, Up.Chain, Up.Might, Up.Haste, Up.Vital, Up.Regen, Up.Swift, Up.Magnet];
+// 봇이 선호하는 업그레이드 순서 (진화는 나오면 항상 먼저)
+const PRIORITY: number[] = [
+  Up.SunLance, Up.Tempest, Up.Bloom, Up.Thunder,
+  Up.Orbit, Up.Bolt, Up.Nova, Up.Chain, Up.Might, Up.Haste, Up.Vital, Up.Swift, Up.Regen, Up.Magnet,
+];
 
 export function botInput(s: SimState, out: InputFrame): InputFrame {
   out.mx = 0;
@@ -21,7 +24,7 @@ export function botInput(s: SimState, out: InputFrame): InputFrame {
     let best = 0;
     let bestRank = 99;
     for (let i = 0; i < s.choices.length; i++) {
-      const rank = PRIORITY.indexOf(s.choices[i] as (typeof PRIORITY)[number]);
+      const rank = PRIORITY.indexOf(s.choices[i]);
       if (rank < bestRank) {
         bestRank = rank;
         best = i;
@@ -41,12 +44,17 @@ export function botInput(s: SimState, out: InputFrame): InputFrame {
     const dx = p.x - e.x;
     const dy = p.y - e.y;
     const d2 = dx * dx + dy * dy;
-    const reach = 190 + e.r * 2;
+    // 점화한 자폭병과 돌진 준비 중인 보스는 더 넓게 피한다
+    const fusing = e.kind === Kind.Bomber && e.mode === 1;
+    const charging = e.kind === Kind.Boss && e.mode !== 0;
+    const reach = fusing ? BOMBER.radius + 70 : charging ? 420 : e.elite ? 300 : 190 + e.r * 2;
     if (d2 > reach * reach) continue;
-    const w = 9000 / (d2 + 60);
+    const w = (fusing ? 40000 : charging ? 30000 : e.elite ? 20000 : 9000) / (d2 + 60);
     vx += dx * w;
     vy += dy * w;
     if (d2 < (e.r + 30) * (e.r + 30)) danger = true;
+    if (fusing && e.timer < 12 && d2 < (BOMBER.radius + 14) * (BOMBER.radius + 14)) danger = true;
+    if (charging && e.mode === 2 && d2 < 160 * 160) danger = true;
   }
   // 적 탄환 회피
   for (const b of s.bullets) {
@@ -60,24 +68,38 @@ export function botInput(s: SimState, out: InputFrame): InputFrame {
     vy += dy * w;
     if (d2 < 34 * 34) danger = true;
   }
-  // 가장 가까운 경험치 쪽으로 약하게 끌림
+  // 보물 상자가 있으면 강하게, 없으면 가장 가까운 경험치 쪽으로 약하게 끌림
   let gd = 420 * 420;
   let gx = 0;
   let gy = 0;
-  for (const g of s.gems) {
-    const dx = g.x - p.x;
-    const dy = g.y - p.y;
+  let pull = 180;
+  for (const c of s.chests) {
+    const dx = c.x - p.x;
+    const dy = c.y - p.y;
     const d2 = dx * dx + dy * dy;
-    if (d2 < gd) {
+    if (d2 < 1200 * 1200 && (pull === 180 || d2 < gd)) {
       gd = d2;
       gx = dx;
       gy = dy;
+      pull = 420;
+    }
+  }
+  if (pull === 180) {
+    for (const g of s.gems) {
+      const dx = g.x - p.x;
+      const dy = g.y - p.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < gd) {
+        gd = d2;
+        gx = dx;
+        gy = dy;
+      }
     }
   }
   if (gx !== 0 || gy !== 0) {
     const d = Math.sqrt(gd);
-    vx += (gx / d) * 180;
-    vy += (gy / d) * 180;
+    vx += (gx / d) * pull;
+    vy += (gy / d) * pull;
   }
   // 벽에 몰리지 않게 중앙으로
   const cx = ARENA / 2 - p.x;

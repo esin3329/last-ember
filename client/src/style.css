@@ -215,7 +215,7 @@ button.primary kbd { color: #2a1400; border-color: rgba(60, 30, 0, 0.35); backgr
 #result-title.win { color: var(--ember); text-shadow: 0 0 20px rgba(255, 150, 40, 0.6); }
 #result-title.lose { color: var(--danger); }
 #result-score { font-size: 54px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1.1; }
-#result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+#result-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0; }
 #result-stats div { background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px 4px; }
 #result-stats dt { font-size: 11px; color: var(--dim); }
 #result-stats dd { margin: 2px 0 0; font-size: 18px; font-weight: 800; }
@@ -249,7 +249,7 @@ body.touch.playing #touch { display: block; }
 #stick { position: fixed; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.05); pointer-events: none; }
 #knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; border-radius: 50%; background: rgba(255, 179, 71, 0.75); box-shadow: 0 0 16px rgba(255, 150, 40, 0.6); transform: translate(-50%, -50%); }
 #dashbtn { position: fixed; right: 22px; bottom: 30px; width: 84px; height: 84px; border-radius: 50%; padding: 0; font-size: 16px; background: rgba(127, 227, 255, 0.16); border: 2px solid rgba(127, 227, 255, 0.6); color: #e8fbff; touch-action: none; }
-#pausebtn { position: fixed; right: 14px; top: 74px; width: 40px; height: 40px; padding: 0; border-radius: 10px; background: rgba(8, 10, 20, 0.6); }
+#pausebtn { position: fixed; right: 14px; top: 92px; width: 40px; height: 40px; padding: 0; border-radius: 10px; background: rgba(8, 10, 20, 0.6); }
 #banner { cursor: pointer; }
 
 /* ── 좁거나 낮은 화면 ── */
@@ -274,13 +274,13 @@ body.touch.playing #touch { display: block; }
   #phase { font-size: 11px; max-width: 118px; line-height: 1.25; }
   .hud-right { right: 10px; top: 14px; font-size: 12px; }
   .hud-right b { font-size: 15px; }
-  #boss { top: 78px; width: 86vw; }
+  #boss { top: 88px; width: calc(100vw - 128px); } /* 오른쪽 콤보·일시정지 버튼을 비켜 간다 */
   #build { left: 10px; bottom: 10px; max-width: calc(100vw - 20px); gap: 4px; }
   #build .chip { font-size: 11px; padding: 2px 6px; }
   #build .chip span { display: none; } /* 좁은 화면에서는 아이콘과 레벨만 */
   #banner { left: 4vw; right: 4vw; transform: none; width: fit-content; margin: 0 auto; font-size: 12px; padding: 7px 14px; }
-  body.touch #build { bottom: auto; top: 96px; }
-  body.touch #banner { bottom: auto; top: 128px; }
+  body.touch #build { bottom: auto; top: 132px; }
+  body.touch #banner { bottom: auto; top: 166px; }
   #toast { font-size: 20px; letter-spacing: 0.06em; }
   #result-score { font-size: 42px; }
 }
@@ -307,4 +307,18 @@ body.touch.playing #touch { display: block; }
   .card .pips { margin-top: 3px; }
   .card .key { top: 8px; left: auto; right: 8px; }
   .card:hover { transform: none; }
+}
+
+/* ── 진화 / 콤보 ── */
+#mult { font-style: normal; font-weight: 800; font-size: 13px; color: var(--dim); }
+#combo-box.hot #mult { color: #ffd23f; text-shadow: 0 0 10px rgba(255, 210, 63, 0.7); }
+#combo-box.hot b { color: #ffe9a8; }
+.chip.evo { border-color: #ffd23f; box-shadow: 0 0 10px rgba(255, 210, 63, 0.35); }
+.chip.evo small { color: #ffd23f; }
+.card.evo { border-color: #ffd23f; background: linear-gradient(180deg, rgba(58, 46, 12, 0.97), rgba(20, 16, 6, 0.97)); box-shadow: 0 0 34px rgba(255, 210, 63, 0.35); }
+.card.evo .kind { color: #ffd23f; }
+.card .recipe { font-size: 11px; color: var(--dim); }
+@media (max-width: 640px) {
+  #combo-box .k { display: none; }
+  .card .recipe { display: none; }
 }

@@ -7,6 +7,9 @@
 
 import { ARENA, BOMBER, BOSS_CHARGE, Kind, PLAYER_R, Up } from '../../shared/defs.ts';
 import { type SimState, orbitBlades, orbitRadius } from '../../shared/sim.ts';
+import bossUrl from '../assets/sprites/runtime/abyssal-core.png';
+import bomberUrl from '../assets/sprites/runtime/bomber.png';
+import playerUrl from '../assets/sprites/runtime/player-ember.png';
 import type { Fx } from './fx.ts';
 
 const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8', '#ffe14d'];
@@ -46,6 +49,33 @@ function glowSprite(color: string, size = 64): HTMLCanvasElement {
   return c;
 }
 
+function loadSprite(url: string) {
+  const image = new Image();
+  const flash = document.createElement('canvas');
+  flash.width = flash.height = 0;
+  image.addEventListener('load', () => {
+    flash.width = image.naturalWidth;
+    flash.height = image.naturalHeight;
+    const ctx = flash.getContext('2d')!;
+    ctx.drawImage(image, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, flash.width, flash.height);
+  }, { once: true });
+  image.src = url;
+  return { image, flash };
+}
+
+function drawSprite(
+  ctx: CanvasRenderingContext2D, image: CanvasImageSource,
+  x: number, y: number, ux: number, uy: number, size: number, pivotX = 0.5,
+): void {
+  ctx.save();
+  ctx.transform(ux, uy, -uy, ux, x, y);
+  ctx.drawImage(image, -size * pivotX, -size / 2, size, size);
+  ctx.restore();
+}
+
 export interface DrawOptions {
   alpha: number; // 틱 사이 보간 계수 0~1
   time: number; // 초 단위 실제 시간 (애니메이션용)
@@ -66,6 +96,9 @@ export class Renderer {
   private glowGem = glowSprite('#5df2c0', 32);
   private glowElite = glowSprite(ELITE_COLOR, 128);
   private glowLance = glowSprite('#ffd23f');
+  private playerSprite = loadSprite(playerUrl);
+  private bossSprite = loadSprite(bossUrl);
+  private bomberSprite = loadSprite(bomberUrl);
   private blades: number[] = [];
   drawn = 0; // 마지막 프레임에 실제로 그린 적 수 (디버그 표시용)
 
@@ -303,10 +336,11 @@ export class Renderer {
     ctx.fillStyle = '#b9ffe9';
     ctx.fill();
 
-    // 적: 종류별로 한 경로에 모아서 fill/stroke 한 번씩
+    // 도형으로 그리는 적은 종류별 한 경로에 모은다.
     const spin = o.time * 0.8;
     for (let kind = 0; kind < SHAPES.length; kind++) {
       const shape = SHAPES[kind];
+      const sprite = kind === Kind.Boss ? this.bossSprite : kind === Kind.Bomber ? this.bomberSprite : null;
       for (let pass = 0; pass < 2; pass++) {
         let any = false;
         ctx.beginPath();
@@ -318,16 +352,24 @@ export class Renderer {
           let ux = 1;
           let uy = 0;
           if (kind === Kind.Boss) {
-            ux = Math.cos(spin);
-            uy = Math.sin(spin);
+            ux = e.mode === 0 ? Math.cos(spin) : e.ax;
+            uy = e.mode === 0 ? Math.sin(spin) : e.ay;
           } else if (kind !== Kind.Tank) {
             const dx = px - x;
             const dy = py - y;
-            const d = Math.hypot(dx, dy) || 1;
-            ux = dx / d;
-            uy = dy / d;
+            const d = Math.hypot(dx, dy);
+            if (d > 0) {
+              ux = dx / d;
+              uy = dy / d;
+            }
           }
           const r = e.r;
+          if (sprite?.flash.width) {
+            const image = pass === 1 ? sprite.flash : sprite.image;
+            // 보스는 비대칭으로 뻗은 가시 대신 코어를 중심으로 회전한다.
+            drawSprite(ctx, image, x, y, ux, uy, kind === Kind.Boss ? r * 2.2 : r * 2.5, kind === Kind.Boss ? 0.4 : 0.5);
+            continue;
+          }
           for (let i = 0; i < shape.length; i += 2) {
             const lx = shape[i] * r;
             const ly = shape[i + 1] * r;
@@ -422,7 +464,11 @@ export class Renderer {
     if (o.showPlayer) {
       // 피격 무적 중에는 깜빡인다
       const blink = p.iframes > 0 && Math.floor(o.time * 20) % 2 === 0;
-      if (!blink) {
+      if (!blink && this.playerSprite.flash.width) {
+        const image = p.dashT > 0 ? this.playerSprite.flash : this.playerSprite.image;
+        // 불꽃 꼬리 길이와 관계없이 밝은 코어가 플레이어 위치에 놓인다.
+        drawSprite(ctx, image, px, py, p.fx, p.fy, PLAYER_R * 4.7, 0.585);
+      } else if (!blink) {
         ctx.beginPath();
         ctx.arc(px, py, PLAYER_R, 0, Math.PI * 2);
         ctx.fillStyle = p.dashT > 0 ? '#ffffff' : '#fff1cf';

@@ -93,6 +93,7 @@ export type SimEvent =
   | { t: 'evolve'; up: number }
   | { t: 'elite' }
   | { t: 'charge' }
+  | { t: 'fuse' }
   | { t: 'bossSpawn' }
   | { t: 'wave' }
   | { t: 'win' }
@@ -484,6 +485,7 @@ function updateEnemies(s: SimState): void {
       if (e.mode === 0 && d < BOMBER.trigger) {
         e.mode = 1;
         e.timer = BOMBER.fuse;
+        if (s.emit) s.events.push({ t: 'fuse' });
       }
       if (e.mode === 1) {
         // 점화 중에는 거의 멈춰서 폭발 범위를 보여 준다.

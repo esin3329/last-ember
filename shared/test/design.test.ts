@@ -58,6 +58,19 @@ test('먼저 잡은 자폭병은 주변 적만 날리고 플레이어는 다치�
   assert.equal(s.player.hp, PLAYER_HP);
 });
 
+test('자폭병 점화 경고는 점화 시 한 번만 발생하고 서버에서는 생략된다', () => {
+  for (const emit of [true, false]) {
+    const s = createSim(7, emit);
+    s.boltCd = 1e9;
+    const bomber = put(s, Kind.Bomber, 60, 0);
+    step(s, idle);
+    assert.equal(bomber.mode, 1);
+    assert.equal(s.events.filter((event) => event.t === 'fuse').length, emit ? 1 : 0);
+    step(s, idle);
+    assert.equal(s.events.some((event) => event.t === 'fuse'), false);
+  }
+});
+
 test('점화한 자폭병을 놓치면 폭발 피해를 입고 콤보가 끊긴다', () => {
   const s = createSim(3);
   s.boltCd = 1e9; // 무기를 꺼서 자폭병을 못 잡게 한다

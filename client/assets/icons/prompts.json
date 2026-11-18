@@ -1,0 +1,77 @@
+{
+  "generator": "Built-in image_gen",
+  "transparent_background": true,
+  "common_prompt": "Use case: stylized-concept. Asset type: one inventory upgrade icon for LAST EMBER, a top-down neon action roguelite. Square canvas with authentic transparent RGBA background. Exactly ONE centered emblem occupying about 76% of width and height with clean transparent padding. Polished geometric hand-painted game item art, bold compact silhouette, three to five broad value planes, subtle faceted shading, vivid saturated colored rim and near-white small core highlights. Strong contrast when displayed at 24 and 44 pixels over nearly black navy. Restrained local emission inside the silhouette. Orthographic front view, consistent icon set style, no tilt or perspective. Clean cutout edges. No enclosing tile, badge, frame, background, external glow, cast shadow, loose particles, unrelated objects, writing, letters, numbers, symbols used as labels, watermark, or icon sheet. Produce a single standalone icon.",
+  "icons": [
+    {
+      "file": "bolt.png",
+      "name": "불씨 탄환",
+      "subject": "A single compact flame projectile aimed diagonally upper right. Cream-white hot teardrop core, amber orange outer flame, two short broad swept-back flame tails. Palette amber #ffb347 and hot orange. Clearly a fiery shot."
+    },
+    {
+      "file": "orbit.png",
+      "name": "공전 칼날",
+      "subject": "Two thick sharpened icy blue crescent blades on opposite sides of a small clear empty circular center, arranged as a compact orbit. Pale blue-white blade edges with deep blue beveled inner facets. Palette ice blue #7fe3ff. Two distinct blades, clear central hole."
+    },
+    {
+      "file": "nova.png",
+      "name": "섬광 파동",
+      "subject": "A compact concentric radial shockwave with two thick lavender luminous circles centered on one small pale violet starburst core. Clearly separated dark transparent gaps between broad rings, each ring slightly broken at the same diagonal to convey outward force. Palette lavender #c79bff."
+    },
+    {
+      "file": "chain.png",
+      "name": "연쇄 번개",
+      "subject": "One thick jagged pale-yellow lightning bolt forking into two short connected angular branches. Three small bright connection nodes at the branch tips, all joined in one compact shape. Palette electric yellow #fff27a, amber shadows. Clear branching lightning silhouette."
+    },
+    {
+      "file": "might.png",
+      "name": "화력",
+      "subject": "One bold upright clenched armored fist, a single compact angular gauntlet with four knuckles at top and one broad thumb on side. Large planar facets, coral red illuminated edge and hot coral core. Palette coral #ff7a6b with burgundy shadows. Read as power and attack strength."
+    },
+    {
+      "file": "haste.png",
+      "name": "가속",
+      "subject": "A mint green circular clock dial with two thick hands and a short split gap in its outer rim, two broad little speed strokes extending left from the clock itself. Clear simple cooldown reduction symbol, no tick marks or numerals. Palette mint #8dffb0."
+    },
+    {
+      "file": "swift.png",
+      "name": "신속",
+      "subject": "One aerodynamic ice-blue wing with three broad swept-back feather planes, pointing decisively right and slightly upward. Its leading edge is a bright arrowlike point. Compact elegant silhouette showing movement speed. Palette sky blue #9ad0ff."
+    },
+    {
+      "file": "vital.png",
+      "name": "생명력",
+      "subject": "One large symmetric faceted heart made of rose-pink glowing crystal, bold familiar heart silhouette, two rounded lobes and deep cleft at top, short downward pointed tip. Pale pink edge and one bright internal facet. Palette rose #ff6f91. No extra decoration."
+    },
+    {
+      "file": "magnet.png",
+      "name": "자력",
+      "subject": "A thick turquoise U-shaped horseshoe magnet with open ends pointing upward. Two bright rectangular pole caps. Two tiny broad diamond-shaped mint gems sit just inside the upper opening, visibly being drawn toward its poles. Compact bold silhouette. Palette turquoise #6ff0d0."
+    },
+    {
+      "file": "regen.png",
+      "name": "재생",
+      "subject": "One thick lime-green healing cross with equal length arms, embraced from below by two broad growing leaves curving upward. Cross and leaves form one compact connected emblem. Bright lime edges and deep emerald bevels. Palette lime #b6ff7a. Read as regrowth and regeneration."
+    },
+    {
+      "file": "sun-lance.png",
+      "name": "태양창",
+      "subject": "Evolved ember projectile. One long thick golden spearhead aimed diagonally upper right with a white-hot central shaft piercing a compact partial sun ring at its base. Three broad golden flame rays extend backward from the ring. Palette radiant gold #ffd23f and ivory. Powerful solar spear, bold simple silhouette."
+    },
+    {
+      "file": "tempest.png",
+      "name": "폭풍 고리",
+      "subject": "Evolved orbit blades. Exactly six swept curved cyan blades interlock in a tight circular cyclone around a clearly open small dark center. Broad icy-white sharpened edges, blue beveled facets. Palette saturated cyan #4fd9ff. Compact storm ring silhouette distinct from a two-blade orbit."
+    },
+    {
+      "file": "bloom.png",
+      "name": "생명 파동",
+      "subject": "Evolved radial shockwave. One mint-green circular pulse ring opening into six broad petal-shaped luminous lobes surrounding a bright white-green central spark. Small dark clear gaps separate petals. Broad simple radial flower silhouette, faceted jade shadows. Palette life green #7dffa8. Read as a healing nova."
+    },
+    {
+      "file": "thunder.png",
+      "name": "뇌신",
+      "subject": "Evolved chain lightning. A dominant thick white-gold thunderbolt pointing downward through a compact angular golden crown with three large upward points, two short jagged side branches. One cohesive formidable lightning crest. Palette ivory gold #fff7b0, saturated yellow edges and amber shadows. Bold clear upgraded lightning silhouette."
+    }
+  ]
+}

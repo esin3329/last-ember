@@ -13,6 +13,7 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.wav': 'audio/wav',
 };
 
 export async function serveStatic(root: string, urlPath: string, res: ServerResponse): Promise<boolean> {

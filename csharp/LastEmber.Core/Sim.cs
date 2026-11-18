@@ -69,7 +69,7 @@ namespace LastEmber.Core
     public enum EventType
     {
         Hit, Kill, Shoot, EnemyShoot, Nova, Chain, Blast, Gem, Chest, Dash, PlayerHit, Combo, LevelUp, Evolve,
-        Elite, Charge, BossSpawn, Wave, Win, Dead,
+        Elite, Charge, BossSpawn, Wave, Win, Dead, Fuse,
     }
 
     /// <summary>연출용 이벤트. 렌더러(Unity라면 MonoBehaviour)가 받아서 파티클·사운드를 재생한다.</summary>
@@ -477,6 +477,7 @@ namespace LastEmber.Core
                     {
                         e.Mode = 1;
                         e.Timer = Defs.BomberFuse;
+                        if (Emit) Events.Add(new SimEvent { Type = EventType.Fuse });
                     }
                     if (e.Mode == 1)
                     {

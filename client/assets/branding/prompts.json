@@ -1,0 +1,24 @@
+{
+  "generator": "Built-in image_gen",
+  "assets": [
+    {
+      "key": "cover",
+      "file": "last-ember-cover.png",
+      "prompt": "Use case: ads-marketing.\nAsset type: public cover / social sharing key art for the game LAST EMBER.\nCreate one finished wide landscape composition with a 1.905:1 aspect ratio, intended for a 1200 x 630 pixel social image. Keep all important imagery and all lettering inside the central 88% safe area.\nImage 1 is a reference for the player's ember identity, warm ivory core and amber-orange flame. Image 2 is a reference for the boss identity, magenta cracked geometric armor and black circular void. These references establish the two characters in this new composition.\nScene: a near-black navy top-down arena with an extremely restrained blue grid fading into darkness. A lone bright compact ember in the lower middle flies toward an imposing Abyssal Core occupying the right half, with a few tiny ember sparks between them and sparse abstract red arrowhead enemies near the far right perimeter. The boss has a vivid magenta ring around a deep dark center and sharp purple armored petals. Convey a small last light confronting encroaching darkness.\nStyle: polished stylized 2D indie-game key art with crisp geometric shapes, restrained faceted shading, cinematic local rim lighting, controlled orange and magenta bloom, deep negative space. Match the supplied game's assets. Preserve the player's circular white-hot core and the boss's hollow core silhouette.\nTypography: the exact game title \"LAST EMBER\" in two stacked lines, LAST above EMBER, filling the upper left with bold condensed uppercase sans-serif lettering. Ivory at the top turning subtly warm gold at the bottom, clean straight geometry, generous clear space around the letters, fully legible even in a small preview. Spell L A S T and E M B E R correctly.\nPalette: midnight #04050a, deep navy #0a0c16, ember amber #ffb347, ivory #fff1cf, magenta #ff4fd8.\nThe title and the duel should feel like one intentionally balanced image. Fill the whole rectangular background. No additional words, subtitle, tagline, HUD, interface, frame, platform logos or watermark.",
+      "transparent_background": false,
+      "references": [
+        "client/assets/sprites/player-ember.png",
+        "client/assets/sprites/abyssal-core.png"
+      ]
+    },
+    {
+      "key": "favicon",
+      "file": "favicon.ico",
+      "prompt": "Use case: logo-brand.\nAsset type: one compact favicon emblem for LAST EMBER.\nCreate a single centered upright ember flame with a white-hot circular core, taking inspiration from the supplied player reference. This is a new small-scale emblem based on the same warm ivory core and orange flame identity.\nSquare canvas with authentic transparent RGBA background. A bold broad teardrop flame rising upward with one short hooked tip leaning slightly right. A thick deep burnt-orange outer contour, one broad amber inner fill, and one round warm ivory core positioned slightly below the center. Exactly three large flat color masses with subtly softened internal transitions. Strong compact silhouette and a broad base, centered as a whole, occupying 80% of canvas height and 76% of width.\nUse the darkest orange edge to maintain contrast against light browser tab bars, and the ivory core to remain visible against dark tab bars. Design deliberately for recognizable 16px and 32px display. Clean cutout edges, thick shapes, very limited detail, consistent with a minimalist neon arcade game.\nColors: deep burnt orange #c94712, ember amber #ffb347, hot ivory #fff1cf.\nNo text, letters, numerals, surrounding tile, enclosing circle, frame, outline outside the flame, checkerboard, external bloom, shadow, particles, extra objects, variants, presentation board or watermark. Produce one icon only.",
+      "transparent_background": true,
+      "references": [
+        "client/assets/sprites/player-ember.png"
+      ]
+    }
+  ]
+}

@@ -310,7 +310,8 @@ function handleEvents(events: SimEvent[]): void {
         }
         break;
       case 'charge':
-        if (!quiet) sfx.warn();
+      case 'fuse':
+        if (!quiet) sfx.warning(ev.t);
         break;
       case 'combo':
         if (!quiet) fx.text(p.x, p.y - 30, `콤보 ×${(2 + ev.tier) / 2}`, '#ffd23f', 20);

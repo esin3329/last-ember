@@ -6,6 +6,18 @@ import { BOSS_TICK, DASH_CD, DT, EVOLUTIONS, Kind, UPGRADE_META, comboTier, maxL
 import type { SimState } from '../../shared/sim.ts';
 import type { BoardEntry } from './api.ts';
 
+const ICON_NAMES = [
+  'bolt', 'orbit', 'nova', 'chain', 'might', 'haste', 'swift', 'vital', 'magnet', 'regen',
+  'sun-lance', 'tempest', 'bloom', 'thunder',
+];
+
+function upgradeIcon(up: number): HTMLImageElement {
+  const icon = new Image(44, 44);
+  icon.src = new URL(`../assets/icons/runtime/${ICON_NAMES[up]}.png`, import.meta.url).href;
+  icon.alt = UPGRADE_META[up].name;
+  return icon;
+}
+
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const el = {
@@ -111,9 +123,8 @@ function buildChips(levels: number[]): HTMLElement[] {
     const meta = UPGRADE_META[i];
     const chip = document.createElement('div');
     chip.className = meta.evo ? 'chip evo' : 'chip';
-    const icon = document.createElement('i');
-    icon.textContent = meta.icon;
-    icon.style.color = meta.color;
+    const icon = upgradeIcon(i);
+    chip.title = meta.name;
     const name = document.createElement('span');
     name.textContent = meta.name;
     const small = document.createElement('small');
@@ -186,9 +197,8 @@ export function showLevelUp(s: SimState, onPick: (index: number) => void): void 
       const key = document.createElement('kbd');
       key.className = 'key';
       key.textContent = String(i + 1);
-      const icon = document.createElement('div');
+      const icon = upgradeIcon(up);
       icon.className = 'icon';
-      icon.textContent = meta.icon;
       const kind = document.createElement('div');
       kind.className = 'kind';
       kind.textContent = meta.evo ? '★ 진화' : cur === 0 ? (meta.weapon ? '새 무기' : '새 능력') : `Lv ${cur} → ${cur + 1}`;

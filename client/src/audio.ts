@@ -1,13 +1,18 @@
-// Web Audio로 합성한 효과음. 음원 파일 없이 오실레이터와 노이즈만 쓴다.
+// Web Audio 효과음. 경고음은 WAV, 나머지는 오실레이터와 노이즈로 합성한다.
 // 같은 소리가 한 프레임에 수십 번 울리지 않도록 소리별 최소 간격을 둔다.
 
+import fuseUrl from '../assets/audio/bomber-fuse.wav';
+import chargeUrl from '../assets/audio/boss-charge.wav';
+
 type Wave = OscillatorType;
+const WARNING_URLS = { fuse: fuseUrl, charge: chargeUrl };
 
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private last = new Map<string, number>();
+  private warnings: Partial<Record<keyof typeof WARNING_URLS, AudioBuffer>> = {};
   private gemStreak = 0;
   private gemAt = 0;
   muted = false;
@@ -33,6 +38,16 @@ export class Sfx {
       this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noise.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      for (const kind of ['fuse', 'charge'] as const) {
+        void fetch(WARNING_URLS[kind])
+          .then((response) => {
+            if (!response.ok) throw new Error(`Warning audio: ${response.status}`);
+            return response.arrayBuffer();
+          })
+          .then((bytes) => this.ctx!.decodeAudioData(bytes))
+          .then((buffer) => { this.warnings[kind] = buffer; })
+          .catch(() => { /* 파일을 읽지 못하면 합성 경고음 사용 */ });
+      }
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
@@ -143,6 +158,20 @@ export class Sfx {
   warn(): void {
     if (!this.gate('warn', 0.5)) return;
     for (let i = 0; i < 3; i++) this.tone('sawtooth', 110, 104, 0.32, 0.16, i * 0.4);
+  }
+  warning(kind: keyof typeof WARNING_URLS): void {
+    if (!this.gate(kind, kind === 'fuse' ? 0.25 : 0.5)) return;
+    const buffer = this.warnings[kind];
+    if (!buffer) {
+      this.warn();
+      return;
+    }
+    const source = this.ctx!.createBufferSource();
+    source.buffer = buffer;
+    const gain = this.ctx!.createGain();
+    gain.gain.value = 0.55;
+    source.connect(gain).connect(this.master!);
+    source.start();
   }
   win(): void {
     if (!this.gate('win', 1)) return;

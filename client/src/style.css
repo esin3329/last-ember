@@ -167,7 +167,7 @@ button.primary kbd { color: #2a1400; border-color: rgba(60, 30, 0, 0.35); backgr
 .bar.boss > div { background: linear-gradient(90deg, #ff4fd8, #ff9be9); transition: transform 0.1s; }
 #build { position: absolute; left: 18px; bottom: 18px; display: flex; gap: 6px; flex-wrap: wrap; max-width: 60vw; }
 .chip { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 8px; background: rgba(8, 10, 20, 0.7); border: 1px solid var(--line); font-size: 13px; font-weight: 700; }
-.chip i { font-style: normal; font-size: 15px; }
+.chip img { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
 .chip small { color: var(--dim); font-size: 11px; }
 
 #banner { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 9px 18px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); font-size: 14px; font-weight: 700; white-space: nowrap; }
@@ -201,7 +201,7 @@ button.primary kbd { color: #2a1400; border-color: rgba(60, 30, 0, 0.35); backgr
 .card:nth-child(3) { animation-delay: 0.1s; }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
 .card:hover { transform: translateY(-6px); border-color: var(--c); background: linear-gradient(180deg, rgba(30, 34, 58, 0.98), rgba(12, 14, 26, 0.98)); box-shadow: 0 0 28px color-mix(in srgb, var(--c) 35%, transparent); }
-.card .icon { font-size: 44px; line-height: 1; color: var(--c); text-shadow: 0 0 18px var(--c); }
+.card .icon { width: 44px; height: 44px; object-fit: contain; }
 .card .title { font-size: 19px; font-weight: 800; }
 .card .kind { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: var(--c); }
 .card .desc { font-size: 14px; color: #c9cdea; line-height: 1.5; flex: 1; }
@@ -301,7 +301,7 @@ body.touch.playing #touch { display: block; }
     align-items: center;
     text-align: left;
   }
-  .card .icon { grid-row: 1 / span 4; font-size: 34px; text-align: center; }
+  .card .icon { grid-row: 1 / span 4; width: 34px; height: 34px; justify-self: center; }
   .card .title { font-size: 16px; }
   .card .desc { font-size: 13px; line-height: 1.35; }
   .card .pips { margin-top: 3px; }

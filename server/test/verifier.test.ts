@@ -90,17 +90,32 @@ test('워커 error와 exit가 연속 발생해도 한 번만 교체한다', asyn
   }
 });
 
-test('작업 타임아웃 시 워커를 종료·교체하고 작업을 거부한다', async () => {
+test('작업 타임아웃 시 워커를 종료·교체하고 작업을 거부한다', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const failed = new ControlledWorker();
+  const replacement = new ControlledWorker();
   let created = 0;
   const pool = new VerifierPool(1, {
-    timeoutMs: 1000,
-    workerFactory: () => createWorker(created++ === 0 ? 'hang' : 'normal'),
+    timeoutMs: 10,
+    workerFactory: () => created++ === 0 ? failed.worker : replacement.worker,
   });
   try {
-    await assert.rejects(pool.verify(seed, runs), VerifyTimeoutError);
-    assert.deepEqual(await pool.verify(seed, runs), simulate(seed, runs));
+    const timedOut = assert.rejects(pool.verify(seed, runs), VerifyTimeoutError);
+    const next = pool.verify(seed, runs);
+    t.mock.timers.tick(10);
+    await timedOut;
+    assert.equal(failed.terminationCalls, 1);
+    assert.equal(created, 1);
+
+    failed.finishTermination();
+    await Promise.resolve();
     assert.equal(created, 2);
+    assert.equal(replacement.posted.length, 1);
+    replacement.emit('message', { id: replacement.posted[0].id, result });
+    assert.deepEqual(await next, result);
   } finally {
+    failed.finishTermination();
+    replacement.finishTermination();
     await pool.close();
   }
 });

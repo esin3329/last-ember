@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { parseVerifierWorkerCount } from '../src/verifier.ts';
 import { createApp } from '../src/app.ts';
+import { parseShutdownTimeoutMs } from '../src/config.ts';
 import { Store } from '../src/store.ts';
 
 interface IssueBody {
@@ -111,6 +112,29 @@ test('잘못된 TRUST_PROXY는 DB를 열거나 서버를 시작하기 전에 실
     });
     assert.equal(result.status, 1, `${value}: ${result.error}`);
     assert.match(result.stderr, /TRUST_PROXY must be an integer between 0 and 32/);
+    assert.doesNotMatch(result.stdout, /LAST EMBER 서버/);
+  }
+});
+
+test('SHUTDOWN_TIMEOUT_MS는 정수 100~600000만 허용한다', () => {
+  const message = /SHUTDOWN_TIMEOUT_MS must be an integer between 100 and 600000/;
+  for (const value of ['99', '600001', '', 'foo', '1.5', 'Infinity', '9007199254740992']) {
+    assert.throws(() => parseShutdownTimeoutMs(value), message, value);
+  }
+  assert.equal(parseShutdownTimeoutMs('100'), 100);
+  assert.equal(parseShutdownTimeoutMs('600000'), 600_000);
+  assert.equal(parseShutdownTimeoutMs(undefined), 10_000);
+});
+
+test('잘못된 SHUTDOWN_TIMEOUT_MS는 DB를 열거나 서버를 시작하기 전에 실패한다', () => {
+  for (const value of ['99', '600001', '', 'foo', '1.5', 'Infinity', '9007199254740992']) {
+    const result = spawnSync(process.execPath, ['server/src/main.ts'], {
+      env: { ...process.env, SHUTDOWN_TIMEOUT_MS: value, DB_PATH: ':memory:', PORT: '0' },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1, `${value}: ${result.error}`);
+    assert.match(result.stderr, /SHUTDOWN_TIMEOUT_MS must be an integer between 100 and 600000/);
     assert.doesNotMatch(result.stdout, /LAST EMBER 서버/);
   }
 });

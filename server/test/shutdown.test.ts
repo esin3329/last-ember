@@ -17,10 +17,20 @@ interface Runtime {
   stderr: () => string;
 }
 
-function launch(t: TestContext): Runtime {
+const QUICK_SHUTDOWN_TIMEOUT_MS = 300;
+const SAFE_SHUTDOWN_TIMEOUT_MS = 5_000;
+
+function launch(t: TestContext, shutdownTimeoutMs = QUICK_SHUTDOWN_TIMEOUT_MS): Runtime {
   const child = fork(new URL('./shutdownFixture.ts', import.meta.url), [], {
     execArgv: [],
-    env: { ...process.env, PORT: '0', DB_PATH: ':memory:', VERIFY_WORKERS: '2', TRUST_PROXY: '0' },
+    env: {
+      ...process.env,
+      PORT: '0',
+      DB_PATH: ':memory:',
+      VERIFY_WORKERS: '2',
+      TRUST_PROXY: '0',
+      SHUTDOWN_TIMEOUT_MS: String(shutdownTimeoutMs),
+    },
     silent: true,
   });
   let stderr = '';
@@ -73,7 +83,7 @@ async function openPartialRequest(t: TestContext, runtime: Runtime) {
 }
 
 test('SIGTERM 뒤 기존 소켓에서 완성된 health 요청은 503이고 정상 종료 코드는 0이다', { timeout: 20_000 }, async (t) => {
-  const runtime = launch(t);
+  const runtime = launch(t, SAFE_SHUTDOWN_TIMEOUT_MS);
   const socket = await openPartialRequest(t, runtime);
   let response = '';
   socket.setEncoding('utf8');
@@ -90,7 +100,7 @@ test('SIGTERM 뒤 기존 소켓에서 완성된 health 요청은 503이고 정�
 
 for (const signalFirst of [true, false]) {
   test(`SIGTERM과 워커 장애가 겹쳐도 종료 코드는 1이다 (signal first: ${signalFirst})`, { timeout: 20_000 }, async (t) => {
-    const runtime = launch(t);
+    const runtime = launch(t, SAFE_SHUTDOWN_TIMEOUT_MS);
     const socket = await openPartialRequest(t, runtime);
     await runtime.command(signalFirst ? 'signal-then-fatal' : 'fatal');
     await runtime.waitFor('fatal');
@@ -102,8 +112,9 @@ for (const signalFirst of [true, false]) {
   });
 }
 
-test('치명적 장애 후 클라이언트가 헤더를 끝내지 않아도 10초 뒤 강제 종료한다', { timeout: 20_000 }, async (t) => {
-  const runtime = launch(t);
+test('치명적 장애 후 클라이언트가 헤더를 끝내지 않아도 설정된 시간 뒤 강제 종료한다', { timeout: 20_000 }, async (t) => {
+  const timeoutMs = QUICK_SHUTDOWN_TIMEOUT_MS;
+  const runtime = launch(t, timeoutMs);
   const socket = await openPartialRequest(t, runtime);
   const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
   await runtime.command('fatal');
@@ -111,13 +122,14 @@ test('치명적 장애 후 클라이언트가 헤더를 끝내지 않아도 10�
   const started = performance.now();
   assert.deepEqual(await runtime.exited, { code: 1, signal: null });
   const elapsed = performance.now() - started;
-  assert.ok(elapsed >= 9_000 && elapsed < 15_000, `shutdown took ${elapsed} ms`);
+  assert.ok(elapsed >= timeoutMs - 50 && elapsed < timeoutMs + 5_000, `shutdown took ${elapsed} ms`);
   await socketClosed;
-  assert.match(runtime.stderr(), /종료 제한 시간\(10초\)/);
+  assert.match(runtime.stderr(), new RegExp(`종료 제한 시간\\(${timeoutMs}ms\\)`));
 });
 
 test('워커 종료가 멈춰도 즉시 장애를 알리고 SIGTERM으로 실패 코드를 덮지 않는다', { timeout: 20_000 }, async (t) => {
-  const runtime = launch(t);
+  const timeoutMs = QUICK_SHUTDOWN_TIMEOUT_MS;
+  const runtime = launch(t, timeoutMs);
   await runtime.waitFor('ready');
   await runtime.command('fatal-stalled-worker');
   await runtime.waitFor('fatal');
@@ -125,7 +137,7 @@ test('워커 종료가 멈춰도 즉시 장애를 알리고 SIGTERM으로 실패
   await runtime.command('signal');
   assert.deepEqual(await runtime.exited, { code: 1, signal: null });
   const elapsed = performance.now() - started;
-  assert.ok(elapsed >= 9_000 && elapsed < 15_000, `shutdown took ${elapsed} ms`);
+  assert.ok(elapsed >= timeoutMs - 50 && elapsed < timeoutMs + 5_000, `shutdown took ${elapsed} ms`);
   assert.match(runtime.stderr(), /검증 워커 풀 장애/);
-  assert.match(runtime.stderr(), /종료 제한 시간\(10초\)/);
+  assert.match(runtime.stderr(), new RegExp(`종료 제한 시간\\(${timeoutMs}ms\\)`));
 });

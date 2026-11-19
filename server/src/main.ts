@@ -1,9 +1,10 @@
-// 서버 진입점.  PORT, DB_PATH, VERIFY_WORKERS, TRUST_PROXY 환경 변수로 설정한다.
+// 서버 진입점.  PORT, DB_PATH, VERIFY_WORKERS, TRUST_PROXY, SHUTDOWN_TIMEOUT_MS 환경 변수로 설정한다.
 
 import { existsSync, mkdirSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseShutdownTimeoutMs } from './config.ts';
 import { createApp, validateTrustProxyHops } from './app.ts';
 import { Store } from './store.ts';
 import { parseVerifierWorkerCount, VerifierPool } from './verifier.ts';
@@ -15,6 +16,8 @@ const workers = parseVerifierWorkerCount(
   process.env.VERIFY_WORKERS,
   Math.max(1, Math.min(4, availableParallelism() - 1)),
 );
+
+const shutdownTimeoutMs = parseShutdownTimeoutMs(process.env.SHUTDOWN_TIMEOUT_MS);
 const trustProxyHops = Number(process.env.TRUST_PROXY ?? 0);
 validateTrustProxyHops(trustProxyHops);
 const distDir = resolve(root, 'dist');
@@ -42,7 +45,7 @@ server.listen(port, () => {
   if (!existsSync(distDir)) console.log('dist가 없어 API만 제공합니다. 클라이언트는 npm run dev:client 또는 npm run build.');
 });
 
-// 종료 신호나 치명적인 워커 오류를 받으면 최대 10초 동안 요청·자원을 정리한다.
+// 종료 신호나 치명적인 워커 오류를 받으면 설정된 제한 시간 동안 요청·자원을 정리한다.
 let closing = false;
 let shutdownExitCode = 0;
 async function shutdown(exitCode = 0): Promise<void> {
@@ -50,10 +53,10 @@ async function shutdown(exitCode = 0): Promise<void> {
   if (closing) return;
   closing = true;
   const deadline = setTimeout(() => {
-    console.error(`[${new Date().toISOString()}] 서버 종료 제한 시간(10초)을 초과하여 강제 종료합니다.`);
+    console.error(`[${new Date().toISOString()}] 서버 종료 제한 시간(${shutdownTimeoutMs}ms)을 초과하여 강제 종료합니다.`);
     server.closeAllConnections();
     process.exit(1);
-  }, 10_000);
+  }, shutdownTimeoutMs);
   const serverClosed = new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
   try {
     await serverClosed;

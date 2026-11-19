@@ -236,9 +236,10 @@ export function createApp(deps: AppDeps): Server {
     });
   });
 
-  // 주기 정리: 제출되지 않은 오래된 발급 기록과 한가한 속도 제한 버킷
+  // 주기 정리: 오래된 판과 프로세스 중단으로 남은 검증 작업, 한가한 속도 제한 버킷
   const timer = setInterval(() => {
-    store.purgeStale(now() - 2 * 60 * 60 * 1000);
+    const current = now();
+    store.purgeStale(current - 2 * 60 * 60 * 1000, current);
     for (const l of [issueLimit, submitLimit, readLimit]) l.sweep(now());
   }, 10 * 60 * 1000);
   timer.unref();

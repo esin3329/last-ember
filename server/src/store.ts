@@ -9,6 +9,7 @@ export interface RunRow {
   seed: number;
   issued_at: number;
   status: RunStatus;
+  reject_reason: string | null;
   name: string | null;
   score: number | null;
   inputs: string | null;
@@ -75,17 +76,25 @@ export class Store {
                              ORDER BY issued_at DESC, rowid DESC LIMIT ?
                            )`),
       create: p('INSERT INTO runs (id, seed, sim_version, ip, issued_at) VALUES (?, ?, ?, ?, ?)'),
-      get: p('SELECT id, seed, issued_at, status, name, score, inputs, sim_version FROM runs WHERE id = ?'),
+      get: p('SELECT id, seed, issued_at, status, name, score, inputs, sim_version, reject_reason FROM runs WHERE id = ?'),
+      recoverAll: p(`UPDATE runs SET status = 'rejected', reject_reason = 'interrupted', submitted_at = ?
+                      WHERE status = 'verifying'`),
+      recoverStale: p(`UPDATE runs SET status = 'rejected', reject_reason = 'interrupted', submitted_at = ?
+                        WHERE status = 'verifying' AND issued_at < ?`),
       // 상태 조건을 건 UPDATE로 "한 번만 제출"을 원자적으로 보장한다(중복 제출 경쟁 방지).
       claim: p(`UPDATE runs SET status = 'verifying' WHERE id = ? AND status = 'issued'`),
       verified: p(`UPDATE runs SET status = 'verified', name = ?, score = ?, kills = ?, ticks = ?,
                    level = ?, won = ?, inputs = ?, submitted_at = ? WHERE id = ?`),
       rejected: p(`UPDATE runs SET status = 'rejected', reject_reason = ?, submitted_at = ? WHERE id = ?`),
+      rank: p('SELECT COUNT(*) AS n FROM runs WHERE sim_version = ? AND status = \'verified\' AND score > ?'),
       board: p(`SELECT id, name, score, kills, ticks, level, won, submitted_at FROM runs
                 WHERE sim_version = ? AND status = 'verified' ORDER BY score DESC, submitted_at ASC LIMIT ?`),
-      rank: p(`SELECT COUNT(*) AS n FROM runs WHERE sim_version = ? AND status = 'verified' AND score > ?`),
-      purge: p(`DELETE FROM runs WHERE status IN ('issued', 'rejected') AND issued_at < ?`),
+      purge: p(`DELETE FROM runs WHERE
+                 (status = 'issued' AND issued_at < ?) OR
+                 (status = 'rejected' AND COALESCE(submitted_at, issued_at) < ?)`),
     };
+    // 프로세스 재시작으로 남은 검증 작업은 다시 제출할 수 없도록 회수한다.
+    this.stmt.recoverAll.run(Date.now());
   }
 
   /** IP당 열린 판을 제한하고, 상한을 넘기는 가장 오래된 판부터 무효화한다. */
@@ -126,8 +135,9 @@ export class Store {
     return Number((this.stmt.rank.get(simVersion, score) as { n: number }).n) + 1;
   }
 
-  purgeStale(before: number): number {
-    return Number(this.stmt.purge.run(before).changes);
+  purgeStale(before: number, now = Date.now()): number {
+    this.stmt.recoverStale.run(now, before);
+    return Number(this.stmt.purge.run(before, before).changes);
   }
 
   close(): void {

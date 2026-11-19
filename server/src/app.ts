@@ -211,7 +211,12 @@ export function createApp(deps: AppDeps): Server {
     if (run.sim_version !== SIM_VERSION) throw new HttpError(409, 'version_mismatch');
 
     // 2) 한 번만 제출 가능 (원자적 선점)
-    if (!store.claim(id)) throw new HttpError(409, 'already_submitted');
+    if (!store.claim(id)) {
+      if (run.status === 'rejected' && run.reject_reason === 'abandoned') {
+        throw new HttpError(409, 'abandoned');
+      }
+      throw new HttpError(409, 'already_submitted');
+    }
 
     const reject = (reason: string): never => {
       store.markRejected(id, reason, now());

@@ -141,7 +141,7 @@ test('IP당 열린 판은 3개로 제한하고 가장 오래된 판을 무효화
     checksum: result.checksum,
   });
   assert.equal(res.status, 409);
-  assert.equal(res.json.error, 'already_submitted');
+  assert.equal(res.json.error, 'abandoned');
 });
 
 test('검증 타임아웃은 verify_error와 503으로 반환되고 판을 거부한다', async () => {

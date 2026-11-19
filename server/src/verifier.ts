@@ -144,7 +144,11 @@ export class VerifierPool {
     } catch (err) {
       // 교체 실패 시 처리할 수 없는 요청을 대기열에 남기지 않는다.
       const error = new VerifyError(`verify worker creation failed: ${String(err)}`);
-      void this.shutdown(error).finally(() => this.onFatal?.(error)).catch(() => {});
+      void this.shutdown(error).catch(() => {});
+      // 워커 종료가 멈춰도 서버가 즉시 장애를 알고 종료 제한 시간을 시작한다.
+      try {
+        void Promise.resolve(this.onFatal?.(error)).catch(() => {});
+      } catch {}
       return;
     }
     this.pump();

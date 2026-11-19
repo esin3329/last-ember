@@ -153,7 +153,7 @@ test('생성 도중 실패하면 이미 만든 워커도 종료한다', async ()
   assert.equal(created, 2);
 });
 
-test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 풀을 닫은 뒤 장애 콜백을 한 번 호출한다', async () => {
+test('교체 생성 실패는 요청을 거부하고 워커 종료를 기다리지 않고 장애 콜백을 한 번 호출한다', async () => {
   const failed = new ControlledWorker();
   const healthy = new ControlledWorker();
   const fatalErrors: VerifyError[] = [];
@@ -180,6 +180,8 @@ test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 �
     assert.equal(healthy.posted.length, 1);
     assert.equal(healthy.terminationCalls, 1);
     assert.equal(pool.isClosed, true);
+    assert.equal(fatalErrors.length, 1);
+    assert.match(fatalErrors[0].message, /verify worker creation failed: Error: worker limit reached/);
     await assert.rejects(pool.verify(seed, runs), /verifier pool closed/);
     healthy.finishTermination();
     await pool.close();
@@ -190,6 +192,37 @@ test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 �
     failed.finishTermination();
     healthy.finishTermination();
     await pool.close();
+  }
+});
+
+test('장애 콜백의 동기 예외나 거부된 Promise가 풀 정리를 막지 않는다', async () => {
+  for (const asyncFailure of [false, true]) {
+    const failed = new ControlledWorker();
+    let created = 0;
+    let fatalCalls = 0;
+    const pool = new VerifierPool(1, {
+      workerFactory: () => {
+        if (created++ === 0) return failed.worker;
+        throw new Error('replacement failed');
+      },
+      onFatal: () => {
+        fatalCalls++;
+        const error = new Error('fatal callback failed');
+        if (asyncFailure) return Promise.reject(error);
+        throw error;
+      },
+    });
+    try {
+      failed.emit('error', new Error('worker crashed'));
+      failed.finishTermination();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(pool.isClosed, true);
+      assert.equal(fatalCalls, 1);
+      await pool.close();
+    } finally {
+      failed.finishTermination();
+      await pool.close();
+    }
   }
 });
 

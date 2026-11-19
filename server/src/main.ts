@@ -33,7 +33,7 @@ const server = createApp({
   verify: pool.verify,
   staticDir: existsSync(distDir) ? distDir : undefined,
   trustProxyHops,
-  healthy: () => !pool.isClosed,
+  healthy: () => !closing && !pool.isClosed,
   log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
 });
 
@@ -42,13 +42,18 @@ server.listen(port, () => {
   if (!existsSync(distDir)) console.log('dist가 없어 API만 제공합니다. 클라이언트는 npm run dev:client 또는 npm run build.');
 });
 
-// 종료 신호나 치명적인 워커 오류를 받으면 새 연결을 막고 요청·자원을 정리한다.
+// 종료 신호나 치명적인 워커 오류를 받으면 최대 10초 동안 요청·자원을 정리한다.
 let closing = false;
 let shutdownExitCode = 0;
 async function shutdown(exitCode = 0): Promise<void> {
   shutdownExitCode = Math.max(shutdownExitCode, exitCode);
   if (closing) return;
   closing = true;
+  const deadline = setTimeout(() => {
+    console.error(`[${new Date().toISOString()}] 서버 종료 제한 시간(10초)을 초과하여 강제 종료합니다.`);
+    server.closeAllConnections();
+    process.exit(1);
+  }, 10_000);
   const serverClosed = new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
   try {
     await serverClosed;
@@ -57,6 +62,7 @@ async function shutdown(exitCode = 0): Promise<void> {
       await pool.close();
     } finally {
       store.close();
+      clearTimeout(deadline);
       process.exit(shutdownExitCode);
     }
   }

@@ -1,0 +1,30 @@
+{
+  "generator": "Built-in image_gen",
+  "assets": [
+    {
+      "key": "chaser",
+      "prompt": "Use case: stylized-concept. Asset type: one isolated game enemy sprite for LAST EMBER. Exact orthographic top-down view, a single centered compact geometric creature on a genuinely transparent RGBA background. Square canvas, complete silhouette with 12% transparent padding on all sides. Match the existing magenta Abyssal Core reference in broad faceted armor planes, saturated neon rim and dark inner bevels. Very bold silhouette readable around 20 to 45 pixels. Three to five broad light/dark planes, restrained internal glow, clean cutout edges. Center the main body at the exact canvas center. No text, tiles, background, external glow, cast shadow, perspective, loose particles, weapons outside the body, variants, sheet or watermark. \nSubject: A coral-red arrowhead hunter pointing RIGHT. Broad triangular dart-shaped carapace, two swept rear winglets and a small bright pink central core. Dense simple red silhouette with a clear pointed front. Palette coral #ff5d73, dark burgundy #42132a, warm pale pink core.",
+      "transparent_background": true
+    },
+    {
+      "key": "runner",
+      "prompt": "Use case: stylized-concept. Asset type: one isolated game enemy sprite for LAST EMBER. Exact orthographic top-down view, a single centered compact geometric creature on a genuinely transparent RGBA background. Square canvas, complete silhouette with 12% transparent padding on all sides. Match the existing magenta Abyssal Core reference in broad faceted armor planes, saturated neon rim and dark inner bevels. Very bold silhouette readable around 20 to 45 pixels. Three to five broad light/dark planes, restrained internal glow, clean cutout edges. Center the main body at the exact canvas center. No text, tiles, background, external glow, cast shadow, perspective, loose particles, weapons outside the body, variants, sheet or watermark. \nSubject: A narrow orange pursuit dart pointing RIGHT. Long sharpened nose and two short swept-back angular fins enclosing one bright amber slit, a noticeably slimmer shape than a broad triangle. Compact angular carapace, dominant tangerine #ffa24d, burnt orange and ivory tiny center. Main center remains at canvas center.",
+      "transparent_background": true
+    },
+    {
+      "key": "tank",
+      "prompt": "Use case: stylized-concept. Asset type: one isolated game enemy sprite for LAST EMBER. Exact orthographic top-down view, a single centered compact geometric creature on a genuinely transparent RGBA background. Square canvas, complete silhouette with 12% transparent padding on all sides. Match the existing magenta Abyssal Core reference in broad faceted armor planes, saturated neon rim and dark inner bevels. Very bold silhouette readable around 20 to 45 pixels. Three to five broad light/dark planes, restrained internal glow, clean cutout edges. Center the main body at the exact canvas center. No text, tiles, background, external glow, cast shadow, perspective, loose particles, weapons outside the body, variants, sheet or watermark. \nSubject: A heavy broad symmetric SIX-SIDED armored hexagon, viewed from directly above. Six thick purple armor plates surround a small violet luminous core. Dense low broad body and a chunky clearly hexagonal silhouette. No extended spikes. Palette lavender #b388ff, rich purple bevels and pale lavender core. Six flat outer edges, thick armor reads as tank.",
+      "transparent_background": true
+    },
+    {
+      "key": "shooter",
+      "prompt": "Use case: stylized-concept. Asset type: one isolated game enemy sprite for LAST EMBER. Exact orthographic top-down view, a single centered compact geometric creature on a genuinely transparent RGBA background. Square canvas, complete silhouette with 12% transparent padding on all sides. Match the existing magenta Abyssal Core reference in broad faceted armor planes, saturated neon rim and dark inner bevels. Very bold silhouette readable around 20 to 45 pixels. Three to five broad light/dark planes, restrained internal glow, clean cutout edges. Center the main body at the exact canvas center. No text, tiles, background, external glow, cast shadow, perspective, loose particles, weapons outside the body, variants, sheet or watermark. \nSubject: A turquoise DIAMOND-shaped sentry with four broad triangular points, central circular teal emitter and dark teal inner facets. Symmetric diamond silhouette, slightly longer RIGHT-facing point, clear pale mint emitter at exact center. Four points only, compact self-contained body. Palette turquoise #4de2c5 and deep teal.",
+      "transparent_background": true
+    },
+    {
+      "key": "arena-floor",
+      "prompt": "Use case: stylized-concept. Asset type: one seamless repeating top-down floor texture for LAST EMBER, a neon arcade survival game. A square texture made of nearly black deep-navy matte stone or alloy with extremely subtle broad polygonal wear and a few very faint blue cracks. Flat orthographic directly overhead, perfectly uniform illumination, no gradients, no vignette, no center motif, no directional lighting. Low contrast, dark values approximately #080b13 through #101827. Seamless/tileable on all four edges with matching edges. Mostly broad quiet flat areas, sparing surface variation that stays unobtrusive at 512px tile size. Intended beneath many tiny glowing orange, magenta and turquoise gameplay objects. No grid lines, symbols, writing, floor props, walls, bright highlights, particles, holes, raised objects, borders or watermark. Fill the complete opaque square.",
+      "transparent_background": false
+    }
+  ]
+}

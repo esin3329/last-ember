@@ -14,6 +14,7 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
 };
 
 export async function serveStatic(root: string, urlPath: string, res: ServerResponse): Promise<boolean> {

@@ -10,6 +10,11 @@ import { type SimState, orbitBlades, orbitRadius } from '../../shared/sim.ts';
 import bossUrl from '../assets/sprites/runtime/abyssal-core.png';
 import bomberUrl from '../assets/sprites/runtime/bomber.png';
 import playerUrl from '../assets/sprites/runtime/player-ember.png';
+import chaserUrl from '../assets/sprites/runtime/chaser.png';
+import runnerUrl from '../assets/sprites/runtime/runner.png';
+import tankUrl from '../assets/sprites/runtime/tank.png';
+import shooterUrl from '../assets/sprites/runtime/shooter.png';
+import floorUrl from '../assets/environment/runtime/arena-floor.png';
 import type { Fx } from './fx.ts';
 
 const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8', '#ffe14d'];
@@ -97,14 +102,26 @@ export class Renderer {
   private glowElite = glowSprite(ELITE_COLOR, 128);
   private glowLance = glowSprite('#ffd23f');
   private playerSprite = loadSprite(playerUrl);
-  private bossSprite = loadSprite(bossUrl);
-  private bomberSprite = loadSprite(bomberUrl);
+  private enemySprites = [
+    { ...loadSprite(chaserUrl), scale: 2.5, pivot: 0.415 },
+    { ...loadSprite(runnerUrl), scale: 3.6, pivot: 0.35 },
+    { ...loadSprite(tankUrl), scale: 2.5, pivot: 0.5 },
+    { ...loadSprite(shooterUrl), scale: 2.5, pivot: 0.43 },
+    { ...loadSprite(bossUrl), scale: 2.2, pivot: 0.4 },
+    { ...loadSprite(bomberUrl), scale: 2.5, pivot: 0.5 },
+  ];
+  private floorPattern: CanvasPattern | null = null;
   private blades: number[] = [];
   drawn = 0; // 마지막 프레임에 실제로 그린 적 수 (디버그 표시용)
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
+    const floor = new Image();
+    floor.addEventListener('load', () => {
+      this.floorPattern = this.ctx.createPattern(floor, 'repeat');
+    }, { once: true });
+    floor.src = floorUrl;
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -142,8 +159,10 @@ export class Renderer {
     ctx.setTransform(scale, 0, 0, scale, (this.w / 2) * this.dpr - camX * scale, (this.h / 2) * this.dpr - camY * scale);
 
     // 바닥과 격자
-    ctx.fillStyle = '#0a0c16';
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = this.floorPattern ?? '#0a0c16';
     ctx.fillRect(0, 0, ARENA, ARENA);
+    ctx.imageSmoothingEnabled = true;
     ctx.beginPath();
     const gx0 = Math.max(0, Math.floor(vx0 / 80) * 80);
     const gy0 = Math.max(0, Math.floor(vy0 / 80) * 80);
@@ -340,7 +359,7 @@ export class Renderer {
     const spin = o.time * 0.8;
     for (let kind = 0; kind < SHAPES.length; kind++) {
       const shape = SHAPES[kind];
-      const sprite = kind === Kind.Boss ? this.bossSprite : kind === Kind.Bomber ? this.bomberSprite : null;
+      const sprite = this.enemySprites[kind];
       for (let pass = 0; pass < 2; pass++) {
         let any = false;
         ctx.beginPath();
@@ -364,10 +383,10 @@ export class Renderer {
             }
           }
           const r = e.r;
-          if (sprite?.flash.width) {
+          if (sprite.flash.width) {
             const image = pass === 1 ? sprite.flash : sprite.image;
-            // 보스는 비대칭으로 뻗은 가시 대신 코어를 중심으로 회전한다.
-            drawSprite(ctx, image, x, y, ux, uy, kind === Kind.Boss ? r * 2.2 : r * 2.5, kind === Kind.Boss ? 0.4 : 0.5);
+            // 비대칭 스프라이트의 코어가 충돌 중심에 놓이도록 보정한다.
+            drawSprite(ctx, image, x, y, ux, uy, r * sprite.scale, sprite.pivot);
             continue;
           }
           for (let i = 0; i < shape.length; i += 2) {

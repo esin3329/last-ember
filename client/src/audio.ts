@@ -1,8 +1,9 @@
-// Web Audio 효과음. 경고음은 WAV, 나머지는 오실레이터와 노이즈로 합성한다.
+// Web Audio 효과음과 음악. 경고음은 WAV, 배경음은 MP3, 나머지는 실시간 합성한다.
 // 같은 소리가 한 프레임에 수십 번 울리지 않도록 소리별 최소 간격을 둔다.
 
 import fuseUrl from '../assets/audio/bomber-fuse.wav';
 import chargeUrl from '../assets/audio/boss-charge.wav';
+import musicUrl from '../assets/audio/arena-loop.mp3';
 
 type Wave = OscillatorType;
 const WARNING_URLS = { fuse: fuseUrl, charge: chargeUrl };
@@ -13,6 +14,9 @@ export class Sfx {
   private noise: AudioBuffer | null = null;
   private last = new Map<string, number>();
   private warnings: Partial<Record<keyof typeof WARNING_URLS, AudioBuffer>> = {};
+  private musicBuffer: AudioBuffer | null = null;
+  private musicGain: GainNode | null = null;
+  private musicPlaying = false;
   private gemStreak = 0;
   private gemAt = 0;
   muted = false;
@@ -48,6 +52,14 @@ export class Sfx {
           .then((buffer) => { this.warnings[kind] = buffer; })
           .catch(() => { /* 파일을 읽지 못하면 합성 경고음 사용 */ });
       }
+      void fetch(musicUrl)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Music audio: ${response.status}`);
+          return response.arrayBuffer();
+        })
+        .then((bytes) => this.ctx!.decodeAudioData(bytes))
+        .then((buffer) => { this.musicBuffer = buffer; this.setMusic(this.musicPlaying); })
+        .catch(() => { /* 음악을 읽지 못해도 효과음과 게임은 계속 동작 */ });
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
@@ -61,6 +73,24 @@ export class Sfx {
       /* 무시 */
     }
     return this.muted;
+  }
+
+  setMusic(playing: boolean): void {
+    if (this.musicPlaying === playing && this.musicGain) return;
+    this.musicPlaying = playing;
+    if (!this.ctx || !this.musicBuffer) return;
+    if (!this.musicGain) {
+      if (!playing) return;
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 0.18;
+      const source = this.ctx.createBufferSource();
+      source.buffer = this.musicBuffer;
+      source.loop = true;
+      source.loopEnd = 16;
+      source.connect(this.musicGain).connect(this.master!);
+      source.start();
+    }
+    this.musicGain.gain.value = playing ? 0.18 : 0;
   }
 
   private gate(name: string, minGap: number): boolean {

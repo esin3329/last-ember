@@ -439,6 +439,7 @@ const SUBMIT_ERRORS: Record<string, string> = {
 function togglePause(): void {
   if (mode !== 'play' || finished) return;
   paused = !paused;
+  sfx.setMusic(!paused && sim.phase === 'playing');
   ui.showPause(paused);
 }
 
@@ -497,6 +498,7 @@ function loop(now: number): void {
 
   if (!paused && !finished) advance(dt);
   if (!paused) fx.update(dt);
+  sfx.setMusic(mode !== 'menu' && !paused && !finished && sim.phase === 'playing');
 
   const waiting = finished || paused || sim.phase === 'levelup';
   renderer.draw(sim, fx, {

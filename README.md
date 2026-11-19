@@ -5,7 +5,7 @@
 
 - 클라이언트: Canvas 2D, Web Audio (런타임 의존성 0개, 번들 gzip 약 20KB)
 - 서버: Node.js 24 기본 모듈만 사용 (`node:http`, `node:sqlite`, `node:worker_threads`)
-- 플레이어·자폭병·보스와 강화 아이콘 14종은 PNG, 점화·돌진 경고음은 WAV를 사용하고, 나머지 전투 그래픽과 효과음은 코드로 생성
+- 플레이어·적 6종·전장 배경·강화 아이콘 14종은 PNG, 점화·돌진 경고음은 WAV, 반복 배경음은 MP3를 사용하고, 나머지 전투 그래픽과 효과음은 코드로 생성
 
 **바로 플레이: https://esin3329.github.io/last-ember/** · 미러: https://last-ember-bib.pages.dev (정적 호스팅이라 오프라인 모드로 동작합니다. 리더보드와 서버 검증은 로컬에서 서버를 띄워야 볼 수 있습니다.)
 

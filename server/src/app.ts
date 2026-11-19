@@ -38,6 +38,8 @@ class HttpError extends Error {
 
 const MAX_BODY = 512 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MAX_ISSUED_RUNS_PER_IP = 3;
+const MAX_RUN_AGE_MS = (MAX_TICKS / TICK_RATE) * 1000 + 10 * 60 * 1000;
 
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -113,7 +115,7 @@ export function createApp(deps: AppDeps): Server {
       if (!issueLimit.take(ip, now())) throw new HttpError(429, 'rate_limited');
       const runId = randomUUID();
       const seed = randomInt(1, 2 ** 31 - 1);
-      store.createRun(runId, seed, SIM_VERSION, ip, now());
+      store.issueRun(runId, seed, SIM_VERSION, ip, now(), MAX_ISSUED_RUNS_PER_IP);
       return send(res, 201, { runId, seed, simVersion: SIM_VERSION });
     }
 
@@ -182,9 +184,9 @@ export function createApp(deps: AppDeps): Server {
       throw new HttpError(422, reason);
     };
 
-    // 3) 벽시계 검사: 60Hz로 N틱을 플레이하려면 최소 N/60초가 걸린다.
-    //    발급 직후 긴 입력 로그를 내는 것(배속 핵, 오프라인 계산)을 막는다.
+    // 3) 최소·최대 경과 시간 검사: 너무 빠른 제출과 오래된 발급 판 재사용을 제한한다.
     const elapsed = now() - run.issued_at;
+    if (elapsed > MAX_RUN_AGE_MS) reject('expired');
     const minElapsed = (ticks / TICK_RATE) * 1000 * 0.9 - 2000;
     if (elapsed < minElapsed) reject('too_fast');
 

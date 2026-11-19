@@ -63,9 +63,17 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_runs_board ON runs (sim_version, status, score DESC);
       CREATE INDEX IF NOT EXISTS idx_runs_stale ON runs (status, issued_at);
+      CREATE INDEX IF NOT EXISTS idx_runs_issue_ip ON runs (ip, status, issued_at);
     `);
     const p = (sql: string) => this.db.prepare(sql);
     this.stmt = {
+      abandonExcess: p(`UPDATE runs SET status = 'rejected', reject_reason = 'abandoned', submitted_at = ?
+                         WHERE ip = ? AND status = 'issued'
+                           AND id NOT IN (
+                             SELECT id FROM runs
+                             WHERE ip = ? AND status = 'issued'
+                             ORDER BY issued_at DESC, rowid DESC LIMIT ?
+                           )`),
       create: p('INSERT INTO runs (id, seed, sim_version, ip, issued_at) VALUES (?, ?, ?, ?, ?)'),
       get: p('SELECT id, seed, issued_at, status, name, score, inputs, sim_version FROM runs WHERE id = ?'),
       // 상태 조건을 건 UPDATE로 "한 번만 제출"을 원자적으로 보장한다(중복 제출 경쟁 방지).
@@ -80,8 +88,17 @@ export class Store {
     };
   }
 
-  createRun(id: string, seed: number, simVersion: number, ip: string, now: number): void {
-    this.stmt.create.run(id, seed, simVersion, ip, now);
+  /** IP당 열린 판을 제한하고, 상한을 넘기는 가장 오래된 판부터 무효화한다. */
+  issueRun(id: string, seed: number, simVersion: number, ip: string, now: number, maxOpen: number): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.stmt.abandonExcess.run(now, ip, ip, maxOpen - 1);
+      this.stmt.create.run(id, seed, simVersion, ip, now);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   getRun(id: string): RunRow | undefined {

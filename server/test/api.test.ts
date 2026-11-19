@@ -106,6 +106,44 @@ test('플레이 시간보다 빨리 제출하면 거부된다 (배속/오프라�
   assert.equal(res.json.error, 'too_fast');
 });
 
+test('발급 후 20분이 지나면 판 제출을 거부한다', async () => {
+  const issued = await api('POST', '/api/runs');
+  const { runs, result } = playBot(issued.json.seed);
+  clock += 20 * 60 * 1000 + 1;
+  const res = await api('POST', `/api/runs/${issued.json.runId}/submit`, {
+    name: 'expired',
+    inputs: runs,
+    score: result.score,
+    checksum: result.checksum,
+  });
+  assert.equal(res.status, 422);
+  assert.equal(res.json.error, 'expired');
+  assert.equal(store.getRun(issued.json.runId)?.status, 'rejected');
+});
+
+test('IP당 열린 판은 3개로 제한하고 가장 오래된 판을 무효화한다', async () => {
+  const first = await api('POST', '/api/runs');
+  const { runs, result } = playBot(first.json.seed);
+  const issued = [first];
+  for (let i = 0; i < 3; i++) issued.push(await api('POST', '/api/runs'));
+
+  assert.equal(first.status, 201);
+  assert.equal(store.getRun(first.json.runId)?.status, 'rejected');
+  for (const run of issued.slice(1)) {
+    assert.equal(run.status, 201);
+    assert.equal(store.getRun(run.json.runId)?.status, 'issued');
+  }
+
+  const res = await api('POST', `/api/runs/${first.json.runId}/submit`, {
+    name: 'abandoned',
+    inputs: runs,
+    score: result.score,
+    checksum: result.checksum,
+  });
+  assert.equal(res.status, 409);
+  assert.equal(res.json.error, 'already_submitted');
+});
+
 test('끝나지 않은 판은 기록되지 않는다', async () => {
   const { runId, runs, result } = await playRun(5);
   assert.ok(!result.finished);

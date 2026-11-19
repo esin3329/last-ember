@@ -429,6 +429,7 @@ const SUBMIT_ERRORS: Record<string, string> = {
   network: '서버에 연결할 수 없습니다',
   mismatch: '서버 재실행 결과와 일치하지 않습니다',
   too_fast: '플레이 시간보다 빨리 제출되었습니다',
+  expired: '발급 후 제출 가능 시간이 지났습니다. 새 판을 시작하세요',
   already_submitted: '이미 제출된 판입니다',
   rate_limited: '요청이 너무 많습니다. 잠시 후 다시 시도하세요',
   server_busy: '서버가 바쁩니다',

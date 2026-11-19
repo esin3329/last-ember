@@ -214,7 +214,8 @@ export function createApp(deps: AppDeps): Server {
 
     // 2) 한 번만 제출 가능 (원자적 선점)
     if (!store.claim(id)) {
-      if (run.status === 'rejected' && run.reject_reason === 'abandoned') {
+      const currentRun = store.getRun(id);
+      if (currentRun?.status === 'rejected' && currentRun.reject_reason === 'abandoned') {
         throw new HttpError(409, 'abandoned');
       }
       throw new HttpError(409, 'already_submitted');

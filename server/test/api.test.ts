@@ -151,6 +151,43 @@ test('IP당 열린 판은 3개로 제한하고 가장 오래된 판을 무효화
   assert.equal(res.json.error, 'abandoned');
 });
 
+test('claim 직전에 무효화된 판은 재조회해 abandoned로 응답한다', async () => {
+  const raceStore = new Store(':memory:');
+  const claim = raceStore.claim.bind(raceStore);
+  let invalidated = false;
+  raceStore.claim = (id) => {
+    if (!invalidated) {
+      invalidated = true;
+      raceStore.markRejected(id, 'abandoned', clock);
+    }
+    return claim(id);
+  };
+  const raceServer = createApp({
+    store: raceStore,
+    verify: async () => { throw new Error('claim 실패 뒤 검증은 호출하지 않는다'); },
+    now: () => clock,
+  });
+  try {
+    await new Promise<void>((resolve) => raceServer.listen(0, resolve));
+    const raceBase = `http://127.0.0.1:${(raceServer.address() as AddressInfo).port}`;
+    const issueResponse = await fetch(`${raceBase}/api/runs`, { method: 'POST' });
+    const issued = (await issueResponse.json()) as { runId: string };
+    assert.equal(issueResponse.status, 201);
+
+    const response = await fetch(`${raceBase}/api/runs/${issued.runId}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs: [4, 1], score: 0, checksum: 0 }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json() as { error: string }).error, 'abandoned');
+    assert.equal(raceStore.getRun(issued.runId)?.reject_reason, 'abandoned');
+  } finally {
+    await new Promise<void>((resolve, reject) => raceServer.close((err) => err ? reject(err) : resolve()));
+    raceStore.close();
+  }
+});
+
 test('health check는 검증 풀이나 DB가 닫히면 503을 반환한다', async () => {
   assert.equal((await api('GET', '/api/health')).status, 200);
 

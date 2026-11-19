@@ -19,9 +19,20 @@ interface Job {
 interface Slot {
   worker: Worker;
   job: Job | null;
+  timer: NodeJS.Timeout | undefined;
+  retired: boolean;
+  terminating: Promise<number> | null;
+}
+
+export interface VerifierPoolOptions {
+  maxQueue?: number;
+  timeoutMs?: number;
+  workerFactory?: () => Worker;
 }
 
 export class QueueFullError extends Error {}
+export class VerifyError extends Error {}
+export class VerifyTimeoutError extends VerifyError {}
 
 export class VerifierPool {
   private slots: Slot[] = [];
@@ -29,42 +40,87 @@ export class VerifierPool {
   private seq = 0;
   private closed = false;
   private maxQueue: number;
+  private timeoutMs: number;
+  private workerFactory: () => Worker;
 
-  constructor(size: number, maxQueue = 64) {
-    this.maxQueue = maxQueue;
+  constructor(size: number, options: VerifierPoolOptions = {}) {
+    this.maxQueue = options.maxQueue ?? 64;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.workerFactory = options.workerFactory ?? (() => new Worker(new URL('./verifyWorker.ts', import.meta.url)));
     for (let i = 0; i < size; i++) this.slots.push(this.spawn());
   }
 
   private spawn(): Slot {
-    const slot: Slot = { worker: new Worker(new URL('./verifyWorker.ts', import.meta.url)), job: null };
+    const slot: Slot = {
+      worker: this.workerFactory(),
+      job: null,
+      timer: undefined,
+      retired: false,
+      terminating: null,
+    };
     slot.worker.on('message', (msg: { id: number; result: RunResult }) => {
+      if (slot.retired || !slot.job || slot.job.id !== msg.id) return;
+      this.clearTimer(slot);
       const job = slot.job;
       slot.job = null;
-      if (job && job.id === msg.id) job.resolve(msg.result);
+      job.resolve(msg.result);
       this.pump();
     });
     slot.worker.on('error', (err) => {
-      // 워커가 죽으면 맡고 있던 작업만 실패시키고 새 워커로 교체한다.
-      slot.job?.reject(err instanceof Error ? err : new Error(String(err)));
-      slot.job = null;
-      if (this.closed) return;
-      const i = this.slots.indexOf(slot);
-      if (i >= 0) this.slots[i] = this.spawn();
-      this.pump();
+      this.failSlot(slot, new VerifyError(`verify worker error: ${String(err)}`));
+    });
+    slot.worker.on('exit', (code) => {
+      this.failSlot(slot, new VerifyError(`verify worker exited with code ${code}`));
     });
     return slot;
   }
 
+  private clearTimer(slot: Slot): void {
+    clearTimeout(slot.timer);
+    slot.timer = undefined;
+  }
+
+  private failSlot(slot: Slot, error: VerifyError): void {
+    if (slot.retired) return;
+    slot.retired = true;
+    this.clearTimer(slot);
+    const job = slot.job;
+    slot.job = null;
+    job?.reject(error);
+
+    if (this.closed) return;
+    const index = this.slots.indexOf(slot);
+    if (index < 0) return;
+    slot.terminating = slot.worker.terminate();
+    void slot.terminating.then(
+      () => this.replace(slot, index),
+      () => this.replace(slot, index),
+    );
+    this.pump();
+  }
+
+  private replace(slot: Slot, index: number): void {
+    if (this.closed || this.slots[index] !== slot) return;
+    this.slots[index] = this.spawn();
+    this.pump();
+  }
+
   private pump(): void {
     for (const slot of this.slots) {
-      if (slot.job || this.queue.length === 0) continue;
+      if (slot.retired || slot.job || this.queue.length === 0) continue;
       const job = this.queue.shift()!;
       slot.job = job;
-      slot.worker.postMessage({ id: job.id, seed: job.seed, runs: job.runs });
+      slot.timer = setTimeout(() => this.failSlot(slot, new VerifyTimeoutError('verify timed out')), this.timeoutMs);
+      try {
+        slot.worker.postMessage({ id: job.id, seed: job.seed, runs: job.runs });
+      } catch (err) {
+        this.failSlot(slot, new VerifyError(`verify worker postMessage failed: ${String(err)}`));
+      }
     }
   }
 
   verify: VerifyFn = (seed, runs) => {
+    if (this.closed) return Promise.reject(new VerifyError('verifier pool closed'));
     if (this.queue.length >= this.maxQueue) return Promise.reject(new QueueFullError('verify queue full'));
     return new Promise<RunResult>((resolve, reject) => {
       this.queue.push({ id: ++this.seq, seed, runs, resolve, reject });
@@ -73,7 +129,19 @@ export class VerifierPool {
   };
 
   async close(): Promise<void> {
+    if (this.closed) return;
     this.closed = true;
-    await Promise.all(this.slots.map((s) => s.worker.terminate()));
+    const error = new VerifyError('verifier pool closed');
+    for (const job of this.queue.splice(0)) job.reject(error);
+    const terminations = this.slots.map((slot) => {
+      slot.retired = true;
+      this.clearTimer(slot);
+      slot.job?.reject(error);
+      slot.job = null;
+      slot.terminating ??= slot.worker.terminate();
+      return slot.terminating;
+    });
+    await Promise.all(terminations);
+    this.slots = [];
   }
 }

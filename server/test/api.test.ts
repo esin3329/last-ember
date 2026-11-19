@@ -7,7 +7,7 @@ import { playBot } from '../../shared/test/helpers.ts';
 import { cleanName, createApp } from '../src/app.ts';
 import { RateLimiter } from '../src/rateLimit.ts';
 import { Store } from '../src/store.ts';
-import { VerifierPool } from '../src/verifier.ts';
+import { VerifyTimeoutError, VerifierPool } from '../src/verifier.ts';
 
 let base = '';
 let clock = 1_000_000;
@@ -142,6 +142,37 @@ test('IP당 열린 판은 3개로 제한하고 가장 오래된 판을 무효화
   });
   assert.equal(res.status, 409);
   assert.equal(res.json.error, 'already_submitted');
+});
+
+test('검증 타임아웃은 verify_error와 503으로 반환되고 판을 거부한다', async () => {
+  const failureStore = new Store(':memory:');
+  const failureServer = createApp({
+    store: failureStore,
+    verify: async () => {
+      throw new VerifyTimeoutError('test timeout');
+    },
+    now: () => clock,
+  });
+  try {
+    await new Promise<void>((resolve) => failureServer.listen(0, resolve));
+    const failureBase = `http://127.0.0.1:${(failureServer.address() as AddressInfo).port}`;
+    const issueResponse = await fetch(`${failureBase}/api/runs`, { method: 'POST' });
+    const issued = (await issueResponse.json()) as { runId: string };
+    assert.equal(issueResponse.status, 201);
+
+    const response = await fetch(`${failureBase}/api/runs/${issued.runId}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs: [4, 1], score: 0, checksum: 0 }),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as { error: string }).error, 'verify_error');
+    assert.equal(failureStore.getRun(issued.runId)?.status, 'rejected');
+    assert.equal(failureStore.getRun(issued.runId)?.reject_reason, 'verify_error');
+  } finally {
+    await new Promise<void>((resolve, reject) => failureServer.close((err) => err ? reject(err) : resolve()));
+    failureStore.close();
+  }
 });
 
 test('끝나지 않은 판은 기록되지 않는다', async () => {

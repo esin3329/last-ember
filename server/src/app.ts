@@ -16,7 +16,7 @@ import { countTicks } from '../../shared/input.ts';
 import { RateLimiter } from './rateLimit.ts';
 import { serveStatic } from './static.ts';
 import type { Store } from './store.ts';
-import { QueueFullError, type VerifyFn } from './verifier.ts';
+import { QueueFullError, VerifyError, type VerifyFn } from './verifier.ts';
 
 export interface AppDeps {
   store: Store;
@@ -197,6 +197,7 @@ export function createApp(deps: AppDeps): Server {
     } catch (err) {
       store.markRejected(id, 'verify_error', now());
       if (err instanceof QueueFullError) throw new HttpError(503, 'server_busy');
+      if (err instanceof VerifyError) throw new HttpError(503, 'verify_error');
       throw err;
     }
     if (!result.finished) reject('unfinished');

@@ -1,4 +1,4 @@
-// 서버 진입점.  PORT, DB_PATH, VERIFY_WORKERS 환경 변수로 설정한다.
+// 서버 진입점.  PORT, DB_PATH, VERIFY_WORKERS, TRUST_PROXY 환경 변수로 설정한다.
 
 import { existsSync, mkdirSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -12,6 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.DB_PATH ?? resolve(root, 'data/runs.db');
 const workers = Number(process.env.VERIFY_WORKERS ?? Math.max(1, Math.min(4, availableParallelism() - 1)));
+const trustProxyHops = Number(process.env.TRUST_PROXY ?? 0);
 const distDir = resolve(root, 'dist');
 
 if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
@@ -22,6 +23,7 @@ const server = createApp({
   store,
   verify: pool.verify,
   staticDir: existsSync(distDir) ? distDir : undefined,
+  trustProxyHops,
   log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
 });
 

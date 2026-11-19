@@ -10,6 +10,7 @@
 //   5. GET  /api/runs/:id/replay    검증된 판의 시드+입력 (클라이언트가 그대로 재생)
 
 import { randomInt, randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { MAX_TICKS, SIM_VERSION, TICK_RATE } from '../../shared/defs.ts';
 import { countTicks } from '../../shared/input.ts';
@@ -22,6 +23,7 @@ export interface AppDeps {
   store: Store;
   verify: VerifyFn;
   now?: () => number;
+  trustProxyHops?: number;
   staticDir?: string;
   log?: (line: string) => void;
 }
@@ -40,6 +42,20 @@ const MAX_BODY = 512 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_ISSUED_RUNS_PER_IP = 3;
 const MAX_RUN_AGE_MS = (MAX_TICKS / TICK_RATE) * 1000 + 10 * 60 * 1000;
+
+/** 프록시 홉 수만큼 XFF 오른쪽에서 건너뛰어 클라이언트 주소를 고른다. */
+function clientIp(req: IncomingMessage, trustedHops: number): string {
+  const remoteAddress = req.socket.remoteAddress ?? 'unknown';
+  if (!Number.isInteger(trustedHops) || trustedHops < 1) return remoteAddress;
+
+  const header = req.headers['x-forwarded-for'];
+  const forwarded = Array.isArray(header) ? header.join(',') : header;
+  if (typeof forwarded !== 'string') return remoteAddress;
+
+  const chain = forwarded.split(',').map((address) => address.trim());
+  const client = chain[chain.length - trustedHops];
+  return client && isIP(client) ? client : remoteAddress;
+}
 
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -91,6 +107,7 @@ export function createApp(deps: AppDeps): Server {
   const { store, verify } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
+  const trustProxyHops = deps.trustProxyHops ?? 0;
   const issueLimit = new RateLimiter(20, 20);
   const submitLimit = new RateLimiter(10, 10);
   const readLimit = new RateLimiter(120, 120);
@@ -98,7 +115,7 @@ export function createApp(deps: AppDeps): Server {
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    const ip = clientIp(req, trustProxyHops);
     const method = req.method ?? 'GET';
 
     if (!path.startsWith('/api/')) {

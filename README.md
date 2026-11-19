@@ -28,10 +28,19 @@ npm run dev
 | 명령 | 설명 |
 | --- | --- |
 | `npm run dev` | API 서버 + Vite 개발 서버 |
-| `npm test` | 시뮬레이션·게임 규칙 단위 테스트 + API 통합 테스트 (22개) |
+| `npm test` | 시뮬레이션·게임 규칙 단위 테스트 + API 통합 테스트 |
 | `npm run build` 후 `npm start` | 클라이언트를 빌드해 서버 하나로 서빙 (8787) |
 | `npm run balance -- 30` | 봇으로 30판을 헤드리스로 돌려 난이도·성능 측정 |
 | `npm run verify:csharp` | C# 코어가 TypeScript와 같은 결과를 내는지 대조 (.NET SDK 필요) |
+
+### 서버 환경 변수
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `PORT` | `8787` | HTTP 포트 |
+| `DB_PATH` | `data/runs.db` | SQLite 파일 경로 (`:memory:`로 메모리 DB 사용) |
+| `VERIFY_WORKERS` | 자동 (`1`–`4`) | 검증 워커 수 |
+| `TRUST_PROXY` | `0` | 신뢰할 프록시 홉 수. `0`은 `X-Forwarded-For`를 무시합니다. `1`은 오른쪽 첫 주소, `2`는 오른쪽 두 번째 주소를 사용합니다. 서버가 해당 홉 수의 신뢰 프록시 뒤에 있을 때만 설정하세요. |
 
 조작: `WASD` 이동 (공격은 자동), `Space` 대시, `1` `2` `3` 강화 선택, `Esc` 일시정지, `M` 음소거, `F3` 성능 정보
 

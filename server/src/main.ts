@@ -6,12 +6,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp, validateTrustProxyHops } from './app.ts';
 import { Store } from './store.ts';
-import { VerifierPool } from './verifier.ts';
+import { parseVerifierWorkerCount, VerifierPool } from './verifier.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.DB_PATH ?? resolve(root, 'data/runs.db');
-const workers = Number(process.env.VERIFY_WORKERS ?? Math.max(1, Math.min(4, availableParallelism() - 1)));
+const workers = parseVerifierWorkerCount(
+  process.env.VERIFY_WORKERS,
+  Math.max(1, Math.min(4, availableParallelism() - 1)),
+);
 const trustProxyHops = Number(process.env.TRUST_PROXY ?? 0);
 validateTrustProxyHops(trustProxyHops);
 const distDir = resolve(root, 'dist');

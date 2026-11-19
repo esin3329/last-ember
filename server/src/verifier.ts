@@ -34,6 +34,20 @@ export class QueueFullError extends Error {}
 export class VerifyError extends Error {}
 export class VerifyTimeoutError extends VerifyError {}
 
+const MAX_VERIFIER_WORKERS = 32;
+
+function validateVerifierWorkerCount(size: number): void {
+  if (!Number.isInteger(size) || size < 1 || size > MAX_VERIFIER_WORKERS) {
+    throw new Error('VERIFY_WORKERS must be an integer between 1 and 32');
+  }
+}
+
+export function parseVerifierWorkerCount(value: string | undefined, fallback: number): number {
+  const size = value === undefined ? fallback : Number(value);
+  validateVerifierWorkerCount(size);
+  return size;
+}
+
 export class VerifierPool {
   private slots: Slot[] = [];
   private queue: Job[] = [];
@@ -45,6 +59,7 @@ export class VerifierPool {
   private workerFactory: () => Worker;
 
   constructor(size: number, options: VerifierPoolOptions = {}) {
+    validateVerifierWorkerCount(size);
     this.maxQueue = options.maxQueue ?? 64;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.workerFactory = options.workerFactory ?? (() => new Worker(new URL('./verifyWorker.ts', import.meta.url)));

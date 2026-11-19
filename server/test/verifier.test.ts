@@ -51,6 +51,17 @@ function createWorker(mode: string): Worker {
   return new Worker(workerUrl, { workerData: mode });
 }
 
+test('워커 풀 크기가 1~32 범위의 정수가 아니면 워커를 만들지 않고 실패한다', () => {
+  let created = 0;
+  for (const size of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 33]) {
+    assert.throws(
+      () => new VerifierPool(size, { workerFactory: () => { created++; throw new Error('unexpected worker'); } }),
+      /VERIFY_WORKERS must be an integer between 1 and 32/,
+    );
+  }
+  assert.equal(created, 0);
+});
+
 test('오류 없이 종료한 워커의 작업은 거부되고 워커를 교체한다', async () => {
   let created = 0;
   const pool = new VerifierPool(1, {

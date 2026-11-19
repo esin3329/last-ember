@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
+import { parseVerifierWorkerCount } from '../src/verifier.ts';
 import { createApp } from '../src/app.ts';
 import { Store } from '../src/store.ts';
 
@@ -76,6 +77,29 @@ test('신뢰 프록시 2홉은 오른쪽에서 두 번째 XFF 주소를 선택�
     assert.equal((await issue(base, '203.0.113.21, 198.51.100.20, 192.0.2.21')).status, 429);
     assert.equal((await issue(base, '203.0.113.21, 198.51.100.21, 192.0.2.21')).status, 201);
   });
+});
+
+test('VERIFY_WORKERS는 정수 1~32만 허용한다', () => {
+  const message = /VERIFY_WORKERS must be an integer between 1 and 32/;
+  for (const value of ['0', '', 'foo', '1.5', '1e2', '33']) {
+    assert.throws(() => parseVerifierWorkerCount(value, 4), message, value);
+  }
+  assert.equal(parseVerifierWorkerCount('1', 4), 1);
+  assert.equal(parseVerifierWorkerCount('32', 4), 32);
+  assert.equal(parseVerifierWorkerCount(undefined, 4), 4);
+});
+
+test('잘못된 VERIFY_WORKERS는 DB를 열거나 서버를 시작하기 전에 실패한다', () => {
+  for (const value of ['0', '', 'foo', '1.5', '1e2', '33']) {
+    const result = spawnSync(process.execPath, ['server/src/main.ts'], {
+      env: { ...process.env, VERIFY_WORKERS: value, TRUST_PROXY: '0', DB_PATH: ':memory:', PORT: '0' },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1, `${value}: ${result.error}`);
+    assert.match(result.stderr, /VERIFY_WORKERS must be an integer between 1 and 32/);
+    assert.doesNotMatch(result.stdout, /LAST EMBER 서버/);
+  }
 });
 
 test('잘못된 TRUST_PROXY는 DB를 열거나 서버를 시작하기 전에 실패한다', () => {

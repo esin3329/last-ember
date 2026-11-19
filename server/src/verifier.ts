@@ -39,6 +39,7 @@ export class VerifierPool {
   private queue: Job[] = [];
   private seq = 0;
   private closed = false;
+  private closing: Promise<void> | null = null;
   private maxQueue: number;
   private timeoutMs: number;
   private workerFactory: () => Worker;
@@ -47,7 +48,12 @@ export class VerifierPool {
     this.maxQueue = options.maxQueue ?? 64;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.workerFactory = options.workerFactory ?? (() => new Worker(new URL('./verifyWorker.ts', import.meta.url)));
-    for (let i = 0; i < size; i++) this.slots.push(this.spawn());
+    try {
+      for (let i = 0; i < size; i++) this.slots.push(this.spawn());
+    } catch (err) {
+      void this.close().catch(() => {});
+      throw err;
+    }
   }
 
   private spawn(): Slot {
@@ -80,6 +86,17 @@ export class VerifierPool {
     slot.timer = undefined;
   }
 
+  private terminate(slot: Slot): Promise<number> {
+    if (!slot.terminating) {
+      try {
+        slot.terminating = slot.worker.terminate();
+      } catch (err) {
+        slot.terminating = Promise.reject(err);
+      }
+    }
+    return slot.terminating;
+  }
+
   private failSlot(slot: Slot, error: VerifyError): void {
     if (slot.retired) return;
     slot.retired = true;
@@ -91,8 +108,7 @@ export class VerifierPool {
     if (this.closed) return;
     const index = this.slots.indexOf(slot);
     if (index < 0) return;
-    slot.terminating = slot.worker.terminate();
-    void slot.terminating.then(
+    void this.terminate(slot).then(
       () => this.replace(slot, index),
       () => this.replace(slot, index),
     );
@@ -101,7 +117,13 @@ export class VerifierPool {
 
   private replace(slot: Slot, index: number): void {
     if (this.closed || this.slots[index] !== slot) return;
-    this.slots[index] = this.spawn();
+    try {
+      this.slots[index] = this.spawn();
+    } catch (err) {
+      // 교체 실패 시 처리할 수 없는 요청을 대기열에 남기지 않는다.
+      void this.shutdown(new VerifyError(`verify worker creation failed: ${String(err)}`)).catch(() => {});
+      return;
+    }
     this.pump();
   }
 
@@ -128,20 +150,25 @@ export class VerifierPool {
     });
   };
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    return this.closing ?? this.shutdown(new VerifyError('verifier pool closed'));
+  }
+
+  private shutdown(error: VerifyError): Promise<void> {
+    if (this.closing) return this.closing;
     this.closed = true;
-    const error = new VerifyError('verifier pool closed');
     for (const job of this.queue.splice(0)) job.reject(error);
-    const terminations = this.slots.map((slot) => {
+    for (const slot of this.slots) {
       slot.retired = true;
       this.clearTimer(slot);
       slot.job?.reject(error);
       slot.job = null;
-      slot.terminating ??= slot.worker.terminate();
-      return slot.terminating;
+    }
+    this.closing = Promise.allSettled(this.slots.map((slot) => this.terminate(slot))).then((results) => {
+      this.slots = [];
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     });
-    await Promise.all(terminations);
-    this.slots = [];
+    return this.closing;
   }
 }

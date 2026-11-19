@@ -9,6 +9,11 @@ interface Job {
 
 if (workerData === 'exit') {
   parentPort!.once('message', () => process.exit(0));
+} else if (workerData === 'reply-exit') {
+  parentPort!.once('message', (job: Job) => {
+    parentPort!.postMessage({ id: job.id, result: simulate(job.seed, job.runs) });
+    process.exit(0);
+  });
 } else if (workerData === 'error') {
   parentPort!.once('message', () => {
     throw new Error('test worker error');

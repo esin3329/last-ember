@@ -43,10 +43,27 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_ISSUED_RUNS_PER_IP = 3;
 const MAX_RUN_AGE_MS = (MAX_TICKS / TICK_RATE) * 1000 + 10 * 60 * 1000;
 
-/** 프록시 홉 수만큼 XFF 오른쪽에서 건너뛰어 클라이언트 주소를 고른다. */
+/** 잘못된 신뢰 경계 설정은 요청 처리 전에 실패시킨다. */
+export function validateTrustProxyHops(hops: number): void {
+  if (!Number.isInteger(hops) || hops < 0 || hops > 32) {
+    throw new Error('TRUST_PROXY must be an integer between 0 and 32');
+  }
+}
+
+function normalizeIp(address: string): string {
+  if (isIP(address) !== 6) return address;
+  const canonical = new URL(`http://[${address.split('%')[0]}]/`).hostname.slice(1, -1);
+  const mapped = /^::ffff:([0-9a-f]+):([0-9a-f]+)$/.exec(canonical);
+  if (!mapped) return canonical;
+  const high = parseInt(mapped[1], 16);
+  const low = parseInt(mapped[2], 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+}
+
+/** 소켓 피어를 첫 신뢰 홉으로 세어 XFF 오른쪽 N번째 주소를 고른다. */
 function clientIp(req: IncomingMessage, trustedHops: number): string {
-  const remoteAddress = req.socket.remoteAddress ?? 'unknown';
-  if (!Number.isInteger(trustedHops) || trustedHops < 1) return remoteAddress;
+  const remoteAddress = normalizeIp(req.socket.remoteAddress ?? 'unknown');
+  if (trustedHops === 0) return remoteAddress;
 
   const header = req.headers['x-forwarded-for'];
   const forwarded = Array.isArray(header) ? header.join(',') : header;
@@ -54,7 +71,7 @@ function clientIp(req: IncomingMessage, trustedHops: number): string {
 
   const chain = forwarded.split(',').map((address) => address.trim());
   const client = chain[chain.length - trustedHops];
-  return client && isIP(client) ? client : remoteAddress;
+  return client && isIP(client) ? normalizeIp(client) : remoteAddress;
 }
 
 function readJson(req: IncomingMessage): Promise<unknown> {
@@ -108,6 +125,7 @@ export function createApp(deps: AppDeps): Server {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
   const trustProxyHops = deps.trustProxyHops ?? 0;
+  validateTrustProxyHops(trustProxyHops);
   const issueLimit = new RateLimiter(20, 20);
   const submitLimit = new RateLimiter(10, 10);
   const readLimit = new RateLimiter(120, 120);

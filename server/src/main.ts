@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApp } from './app.ts';
+import { createApp, validateTrustProxyHops } from './app.ts';
 import { Store } from './store.ts';
 import { VerifierPool } from './verifier.ts';
 
@@ -13,6 +13,7 @@ const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.DB_PATH ?? resolve(root, 'data/runs.db');
 const workers = Number(process.env.VERIFY_WORKERS ?? Math.max(1, Math.min(4, availableParallelism() - 1)));
 const trustProxyHops = Number(process.env.TRUST_PROXY ?? 0);
+validateTrustProxyHops(trustProxyHops);
 const distDir = resolve(root, 'dist');
 
 if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });

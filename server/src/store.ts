@@ -93,6 +93,7 @@ export class Store {
                  (status = 'issued' AND issued_at < ?) OR
                  (status = 'rejected' AND COALESCE(submitted_at, issued_at) < ?)`),
     };
+    // DB 파일당 하나의 서버만 사용한다. 다른 서버의 진행 중 검증과 중단된 작업은 구별하지 않는다.
     // 프로세스 재시작으로 남은 검증 작업은 다시 제출할 수 없도록 회수한다.
     this.stmt.recoverAll.run(Date.now());
   }
@@ -105,7 +106,14 @@ export class Store {
       this.stmt.create.run(id, seed, simVersion, ip, now);
       this.db.exec('COMMIT');
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      try {
+        // SQLITE_FULL/IOERR 등은 SQLite 자체가 이미 트랜잭션을 취소했을 수 있다.
+        if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      } catch (rollbackError) {
+        // 미완료 트랜잭션에서 다른 요청이 읽거나 쓰지 못하게 연결을 폐쇄한다.
+        this.close();
+        throw new AggregateError([err, rollbackError], 'Failed to roll back run issuance');
+      }
       throw err;
     }
   }
@@ -141,6 +149,6 @@ export class Store {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db.isOpen) this.db.close();
   }
 }

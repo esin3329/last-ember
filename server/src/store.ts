@@ -83,6 +83,8 @@ export class Store {
                         WHERE status = 'verifying' AND issued_at < ?`),
       // 상태 조건을 건 UPDATE로 "한 번만 제출"을 원자적으로 보장한다(중복 제출 경쟁 방지).
       claim: p(`UPDATE runs SET status = 'verifying' WHERE id = ? AND status = 'issued'`),
+      releaseClaim: p(`UPDATE runs SET status = 'issued', reject_reason = NULL, submitted_at = NULL
+                       WHERE id = ? AND status = 'verifying'`),
       verified: p(`UPDATE runs SET status = 'verified', name = ?, score = ?, kills = ?, ticks = ?,
                    level = ?, won = ?, inputs = ?, submitted_at = ? WHERE id = ?`),
       rejected: p(`UPDATE runs SET status = 'rejected', reject_reason = ?, submitted_at = ? WHERE id = ?`),
@@ -96,6 +98,10 @@ export class Store {
     // DB 파일당 하나의 서버만 사용한다. 다른 서버의 진행 중 검증과 중단된 작업은 구별하지 않는다.
     // 프로세스 재시작으로 남은 검증 작업은 다시 제출할 수 없도록 회수한다.
     this.stmt.recoverAll.run(Date.now());
+  }
+
+  get isClosed(): boolean {
+    return !this.db.isOpen;
   }
 
   /** IP당 열린 판을 제한하고, 상한을 넘기는 가장 오래된 판부터 무효화한다. */
@@ -125,6 +131,11 @@ export class Store {
   /** 제출 권한을 선점한다. 이미 제출됐거나 없는 판이면 false. */
   claim(id: string): boolean {
     return Number(this.stmt.claim.run(id).changes) === 1;
+  }
+
+  /** 검증 장애로 실패한 제출 권한을 되돌린다. */
+  releaseClaim(id: string): void {
+    this.stmt.releaseClaim.run(id);
   }
 
   markVerified(id: string, r: VerifiedRun, now: number): void {

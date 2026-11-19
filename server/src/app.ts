@@ -26,6 +26,7 @@ export interface AppDeps {
   trustProxyHops?: number;
   staticDir?: string;
   log?: (line: string) => void;
+  healthy?: () => boolean;
 }
 
 class HttpError extends Error {
@@ -143,7 +144,8 @@ export function createApp(deps: AppDeps): Server {
     }
 
     if (method === 'GET' && path === '/api/health') {
-      return send(res, 200, { ok: true, simVersion: SIM_VERSION });
+      const ok = !store.isClosed && (deps.healthy?.() ?? true);
+      return send(res, ok ? 200 : 503, { ok, simVersion: SIM_VERSION });
     }
 
     if (method === 'POST' && path === '/api/runs') {
@@ -235,9 +237,15 @@ export function createApp(deps: AppDeps): Server {
     try {
       result = await verify(run.seed, inputs as number[]);
     } catch (err) {
+      if (err instanceof QueueFullError) {
+        store.releaseClaim(id);
+        throw new HttpError(503, 'server_busy');
+      }
+      if (err instanceof VerifyError) {
+        store.releaseClaim(id);
+        throw new HttpError(503, 'verify_error');
+      }
       store.markRejected(id, 'verify_error', now());
-      if (err instanceof QueueFullError) throw new HttpError(503, 'server_busy');
-      if (err instanceof VerifyError) throw new HttpError(503, 'verify_error');
       throw err;
     }
     if (!result.finished) reject('unfinished');

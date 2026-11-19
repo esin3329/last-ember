@@ -22,12 +22,18 @@ const distDir = resolve(root, 'dist');
 if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
 
 const store = new Store(dbPath);
-const pool = new VerifierPool(workers);
+const pool = new VerifierPool(workers, {
+  onFatal: (error) => {
+    console.error(`[${new Date().toISOString()}] 검증 워커 풀 장애로 서버를 종료합니다: ${error.message}`);
+    void shutdown(1);
+  },
+});
 const server = createApp({
   store,
   verify: pool.verify,
   staticDir: existsSync(distDir) ? distDir : undefined,
   trustProxyHops,
+  healthy: () => !pool.isClosed,
   log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
 });
 
@@ -36,15 +42,24 @@ server.listen(port, () => {
   if (!existsSync(distDir)) console.log('dist가 없어 API만 제공합니다. 클라이언트는 npm run dev:client 또는 npm run build.');
 });
 
-// 종료 신호를 받으면 새 연결을 막고 진행 중인 요청을 끝낸 뒤 자원을 정리한다.
+// 종료 신호나 치명적인 워커 오류를 받으면 새 연결을 막고 요청·자원을 정리한다.
 let closing = false;
-async function shutdown(): Promise<void> {
+let shutdownExitCode = 0;
+async function shutdown(exitCode = 0): Promise<void> {
+  shutdownExitCode = Math.max(shutdownExitCode, exitCode);
   if (closing) return;
   closing = true;
-  server.close();
-  await pool.close();
-  store.close();
-  process.exit(0);
+  const serverClosed = new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
+  try {
+    await serverClosed;
+  } finally {
+    try {
+      await pool.close();
+    } finally {
+      store.close();
+      process.exit(shutdownExitCode);
+    }
+  }
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => { void shutdown(); });
+process.on('SIGTERM', () => { void shutdown(); });

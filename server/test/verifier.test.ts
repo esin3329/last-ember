@@ -138,9 +138,10 @@ test('생성 도중 실패하면 이미 만든 워커도 종료한다', async ()
   assert.equal(created, 2);
 });
 
-test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 풀을 닫는다', async () => {
+test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 풀을 닫은 뒤 장애 콜백을 한 번 호출한다', async () => {
   const failed = new ControlledWorker();
   const healthy = new ControlledWorker();
+  const fatalErrors: VerifyError[] = [];
   let created = 0;
   const pool = new VerifierPool(2, {
     workerFactory: () => {
@@ -148,8 +149,10 @@ test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 �
       if (created === 2) return healthy.worker;
       throw new Error('worker limit reached');
     },
+    onFatal: (error) => fatalErrors.push(error),
   });
   try {
+    assert.equal(pool.isClosed, false);
     const first = assert.rejects(pool.verify(seed, runs), /verify worker error/);
     const second = assert.rejects(pool.verify(seed, runs), {
       constructor: VerifyError,
@@ -161,9 +164,12 @@ test('교체 생성 실패는 나머지 실행·대기 요청을 거부하고 �
     await Promise.all([first, second, queued]);
     assert.equal(healthy.posted.length, 1);
     assert.equal(healthy.terminationCalls, 1);
+    assert.equal(pool.isClosed, true);
     await assert.rejects(pool.verify(seed, runs), /verifier pool closed/);
     healthy.finishTermination();
     await pool.close();
+    assert.equal(fatalErrors.length, 1);
+    assert.match(fatalErrors[0].message, /verify worker creation failed: Error: worker limit reached/);
     assert.equal(created, 3);
   } finally {
     failed.finishTermination();

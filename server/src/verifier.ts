@@ -28,6 +28,7 @@ export interface VerifierPoolOptions {
   maxQueue?: number;
   timeoutMs?: number;
   workerFactory?: () => Worker;
+  onFatal?: (error: VerifyError) => void;
 }
 
 export class QueueFullError extends Error {}
@@ -57,18 +58,24 @@ export class VerifierPool {
   private maxQueue: number;
   private timeoutMs: number;
   private workerFactory: () => Worker;
+  private onFatal: ((error: VerifyError) => void) | undefined;
 
   constructor(size: number, options: VerifierPoolOptions = {}) {
     validateVerifierWorkerCount(size);
     this.maxQueue = options.maxQueue ?? 64;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.workerFactory = options.workerFactory ?? (() => new Worker(new URL('./verifyWorker.ts', import.meta.url)));
+    this.onFatal = options.onFatal;
     try {
       for (let i = 0; i < size; i++) this.slots.push(this.spawn());
     } catch (err) {
       void this.close().catch(() => {});
       throw err;
     }
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
   }
 
   private spawn(): Slot {
@@ -136,7 +143,8 @@ export class VerifierPool {
       this.slots[index] = this.spawn();
     } catch (err) {
       // 교체 실패 시 처리할 수 없는 요청을 대기열에 남기지 않는다.
-      void this.shutdown(new VerifyError(`verify worker creation failed: ${String(err)}`)).catch(() => {});
+      const error = new VerifyError(`verify worker creation failed: ${String(err)}`);
+      void this.shutdown(error).finally(() => this.onFatal?.(error)).catch(() => {});
       return;
     }
     this.pump();

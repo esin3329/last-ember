@@ -7,7 +7,7 @@ import { playBot } from '../../shared/test/helpers.ts';
 import { cleanName, createApp } from '../src/app.ts';
 import { RateLimiter } from '../src/rateLimit.ts';
 import { Store } from '../src/store.ts';
-import { VerifyTimeoutError, VerifierPool } from '../src/verifier.ts';
+import { QueueFullError, VerifyTimeoutError, VerifierPool } from '../src/verifier.ts';
 
 let base = '';
 let clock = 1_000_000;
@@ -68,16 +68,23 @@ test('정상 플레이는 검증을 통과하고 리더보드에 오른다', asy
   assert.deepEqual(replay.json.inputs, runs);
 });
 
-test('점수를 부풀려 제출하면 거부된다', async () => {
+test('점수를 부풀려 제출하면 거부되고 같은 판 재제출도 막힌다', async () => {
   const { runId, runs, result } = await playRun();
-  const res = await api('POST', `/api/runs/${runId}/submit`, {
+  const body = {
     name: 'cheater',
     inputs: runs,
     score: result.score + 100000,
     checksum: result.checksum,
-  });
+  };
+  const res = await api('POST', `/api/runs/${runId}/submit`, body);
   assert.equal(res.status, 422);
   assert.equal(res.json.error, 'mismatch');
+  assert.equal(store.getRun(runId)?.status, 'rejected');
+  assert.equal(store.getRun(runId)?.reject_reason, 'mismatch');
+
+  const retry = await api('POST', `/api/runs/${runId}/submit`, body);
+  assert.equal(retry.status, 409);
+  assert.equal(retry.json.error, 'already_submitted');
   const board = await api('GET', '/api/leaderboard');
   assert.ok(!board.json.entries.some((e: any) => e.runId === runId));
 });
@@ -144,12 +151,50 @@ test('IP당 열린 판은 3개로 제한하고 가장 오래된 판을 무효화
   assert.equal(res.json.error, 'abandoned');
 });
 
-test('검증 타임아웃은 verify_error와 503으로 반환되고 판을 거부한다', async () => {
+test('health check는 검증 풀이나 DB가 닫히면 503을 반환한다', async () => {
+  assert.equal((await api('GET', '/api/health')).status, 200);
+
+  const healthStore = new Store(':memory:');
+  let verifierHealthy = true;
+  const healthServer = createApp({
+    store: healthStore,
+    verify: async () => { throw new Error('이 테스트에서는 검증을 호출하지 않는다'); },
+    healthy: () => verifierHealthy,
+  });
+  try {
+    await new Promise<void>((resolve) => healthServer.listen(0, resolve));
+    const healthBase = `http://127.0.0.1:${(healthServer.address() as AddressInfo).port}`;
+    const poolFailure = await fetch(`${healthBase}/api/health`);
+    assert.equal(poolFailure.status, 200);
+
+    verifierHealthy = false;
+    const closedPool = await fetch(`${healthBase}/api/health`);
+    assert.equal(closedPool.status, 503);
+    assert.equal((await closedPool.json() as { ok: boolean }).ok, false);
+
+    verifierHealthy = true;
+    healthStore.close();
+    const closedStore = await fetch(`${healthBase}/api/health`);
+    assert.equal(closedStore.status, 503);
+    assert.equal((await closedStore.json() as { ok: boolean }).ok, false);
+  } finally {
+    await new Promise<void>((resolve, reject) => healthServer.close((err) => err ? reject(err) : resolve()));
+    healthStore.close();
+  }
+});
+
+test('검증 장애 후 같은 판을 재제출하면 검증되어 리더보드에 오른다', async () => {
   const failureStore = new Store(':memory:');
+  const failures = [
+    new VerifyTimeoutError('test timeout'),
+    new QueueFullError('test queue full'),
+  ];
   const failureServer = createApp({
     store: failureStore,
-    verify: async () => {
-      throw new VerifyTimeoutError('test timeout');
+    verify: async (seed, runs) => {
+      const failure = failures.shift();
+      if (failure) throw failure;
+      return pool.verify(seed, runs);
     },
     now: () => clock,
   });
@@ -157,18 +202,34 @@ test('검증 타임아웃은 verify_error와 503으로 반환되고 판을 거�
     await new Promise<void>((resolve) => failureServer.listen(0, resolve));
     const failureBase = `http://127.0.0.1:${(failureServer.address() as AddressInfo).port}`;
     const issueResponse = await fetch(`${failureBase}/api/runs`, { method: 'POST' });
-    const issued = (await issueResponse.json()) as { runId: string };
+    const issued = (await issueResponse.json()) as { runId: string; seed: number };
     assert.equal(issueResponse.status, 201);
+    const { runs, result } = playBot(issued.seed);
+    clock += (result.ticks / 60) * 1000 + 1000;
+    const body = { name: '재제출', inputs: runs, score: result.score, checksum: result.checksum };
+
+    for (const expectedError of ['verify_error', 'server_busy']) {
+      const response = await fetch(`${failureBase}/api/runs/${issued.runId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json() as { error: string }).error, expectedError);
+      assert.equal(failureStore.getRun(issued.runId)?.status, 'issued');
+      assert.equal(failureStore.getRun(issued.runId)?.reject_reason, null);
+    }
 
     const response = await fetch(`${failureBase}/api/runs/${issued.runId}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: [4, 1], score: 0, checksum: 0 }),
+      body: JSON.stringify(body),
     });
-    assert.equal(response.status, 503);
-    assert.equal((await response.json() as { error: string }).error, 'verify_error');
-    assert.equal(failureStore.getRun(issued.runId)?.status, 'rejected');
-    assert.equal(failureStore.getRun(issued.runId)?.reject_reason, 'verify_error');
+    assert.equal(response.status, 200);
+    assert.equal(failureStore.getRun(issued.runId)?.status, 'verified');
+    const boardResponse = await fetch(`${failureBase}/api/leaderboard`);
+    const board = (await boardResponse.json()) as { entries: { runId: string }[] };
+    assert.ok(board.entries.some((entry) => entry.runId === issued.runId));
   } finally {
     await new Promise<void>((resolve, reject) => failureServer.close((err) => err ? reject(err) : resolve()));
     failureStore.close();

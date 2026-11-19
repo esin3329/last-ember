@@ -433,8 +433,8 @@ const SUBMIT_ERRORS: Record<string, string> = {
   already_submitted: '이미 제출된 판입니다',
   abandoned: '새 판 발급으로 이 판이 무효화되었습니다. 새 판을 시작하세요',
   rate_limited: '요청이 너무 많습니다. 잠시 후 다시 시도하세요',
-  server_busy: '서버가 바쁩니다',
-  verify_error: '서버 검증이 중단되었습니다. 새 판을 시작하세요',
+  server_busy: '검증 서버가 바쁩니다. 잠시 뒤 같은 판을 다시 제출할 수 있습니다',
+  verify_error: '검증 중 서버 오류가 발생했습니다. 잠시 뒤 같은 판을 다시 제출할 수 있습니다',
 };
 
 // ───────────────────────── 입력 바인딩 ─────────────────────────

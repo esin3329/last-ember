@@ -5,11 +5,11 @@
 // 드로우 콜을 줄이기 위해 적은 종류별로 한 경로(Path)에 모아 한 번에 채우고,
 // 화면 밖 개체는 그리지 않는다.
 
-import { ARENA, BOMBER, BOSS_CHARGE, Kind, PLAYER_R, Up } from '../../shared/defs.ts';
+import { ARENA, BOMBER, BOSS_CHARGE, DT, Kind, PLAYER_R, Up } from '../../shared/defs.ts';
 import { type SimState, orbitBlades, orbitRadius } from '../../shared/sim.ts';
 import bossUrl from '../assets/sprites/runtime/abyssal-core.png';
 import bomberUrl from '../assets/sprites/runtime/bomber.png';
-import playerUrl from '../assets/sprites/runtime/player-ember.png';
+import playerUrl from '../assets/sprites/runtime/player-ember-v2.png';
 import chaserUrl from '../assets/sprites/runtime/chaser.png';
 import runnerUrl from '../assets/sprites/runtime/runner.png';
 import tankUrl from '../assets/sprites/runtime/tank.png';
@@ -19,6 +19,8 @@ import type { Fx } from './fx.ts';
 
 const KIND_COLOR = ['#ff5d73', '#ffa24d', '#b388ff', '#4de2c5', '#ff4fd8', '#ffe14d'];
 const ELITE_COLOR = '#ffd23f';
+const PLAYER_SPRITE_SIZE = PLAYER_R * 4.7;
+const PLAYER_SPRITE_PIVOT = 0.605;
 export const kindColor = (k: number): string => KIND_COLOR[k];
 
 function polygon(n: number, inner = 1): number[] {
@@ -81,6 +83,40 @@ function drawSprite(
   ctx.restore();
 }
 
+function drawPlayerFlame(
+  ctx: CanvasRenderingContext2D, image: HTMLImageElement,
+  x: number, y: number, ux: number, uy: number, time: number,
+): void {
+  const size = PLAYER_SPRITE_SIZE;
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  const split = Math.round(width * 0.44);
+  const tailWidth = size * split / width;
+  const joint = tailWidth - size * PLAYER_SPRITE_PIVOT;
+
+  ctx.save();
+  ctx.transform(ux, uy, -uy, ux, x, y);
+  ctx.fillStyle = '#ffba58';
+  for (let i = 0; i < 4; i++) {
+    const age = (time * 2.6 + i * 0.25) % 1;
+    const radius = 1.5 - age;
+    ctx.globalAlpha = 0.8 * (1 - age);
+    ctx.beginPath();
+    ctx.arc(-24 - age * (24 + i * 3), (i - 1.5) * (5 + age * 6), radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // 코어 앞쪽을 고정하고 이음새 뒤로 꼬리만 늘리거나 휘게 한다.
+  ctx.save();
+  const stretch = 1 + 0.17 * Math.sin(time * 18) + 0.07 * Math.sin(time * 29);
+  ctx.transform(stretch, 0.14 * Math.sin(time * 15), 0, 1, joint, 0);
+  ctx.drawImage(image, 0, 0, split + 1, height, -tailWidth, -size / 2, tailWidth + size / width, size);
+  ctx.restore();
+  ctx.drawImage(image, split, 0, width - split, height, joint, -size / 2, size - tailWidth, size);
+  ctx.restore();
+}
+
 export interface DrawOptions {
   alpha: number; // 틱 사이 보간 계수 0~1
   time: number; // 초 단위 실제 시간 (애니메이션용)
@@ -102,6 +138,7 @@ export class Renderer {
   private glowElite = glowSprite(ELITE_COLOR, 128);
   private glowLance = glowSprite('#ffd23f');
   private playerSprite = loadSprite(playerUrl);
+  private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private enemySprites = [
     { ...loadSprite(chaserUrl), scale: 2.5, pivot: 0.415 },
     { ...loadSprite(runnerUrl), scale: 3.6, pivot: 0.35 },
@@ -485,8 +522,11 @@ export class Renderer {
       const blink = p.iframes > 0 && Math.floor(o.time * 20) % 2 === 0;
       if (!blink && this.playerSprite.flash.width) {
         const image = p.dashT > 0 ? this.playerSprite.flash : this.playerSprite.image;
-        // 불꽃 꼬리 길이와 관계없이 밝은 코어가 플레이어 위치에 놓인다.
-        drawSprite(ctx, image, px, py, p.fx, p.fy, PLAYER_R * 4.7, 0.585);
+        if (p.dashT > 0 || this.reducedMotion.matches) {
+          drawSprite(ctx, image, px, py, p.fx, p.fy, PLAYER_SPRITE_SIZE, PLAYER_SPRITE_PIVOT);
+        } else {
+          drawPlayerFlame(ctx, this.playerSprite.image, px, py, p.fx, p.fy, (s.tick + a) * DT);
+        }
       } else if (!blink) {
         ctx.beginPath();
         ctx.arc(px, py, PLAYER_R, 0, Math.PI * 2);

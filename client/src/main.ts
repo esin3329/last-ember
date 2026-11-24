@@ -93,7 +93,8 @@ function playerName(): string {
 
 function resetWorld(newSim: SimState): void {
   sim = newSim;
-  playEpoch++; // 진행 중이던 구간 동기화·제출 응답이 새 화면을 건드리지 못하게 한다
+  playEpoch++; // 이전 화면에서 시작한 발급·리플레이·구간 동기화·제출 응답을 무시한다.
+  starting = false;
   syncing = false;
   window.clearTimeout(syncNoticeTimer);
   submission.discard();
@@ -127,6 +128,8 @@ function enterMenu(): void {
 async function startGame(): Promise<void> {
   if (starting) return;
   starting = true;
+  armBack();
+  const epoch = playEpoch;
   sfx.unlock();
   try {
     localStorage.setItem('ember.name', ui.dom.name.value);
@@ -136,6 +139,7 @@ async function startGame(): Promise<void> {
   // 시드는 서버가 정한다(랭킹 v3: 0번 구간 시드만 받고 나머지는 구간마다 받는다).
   // 서버가 없거나 한도에 걸리면 로컬 시드로 오프라인(v2 규칙) 플레이.
   const issued = await api.issueRun();
+  if (epoch !== playEpoch) return;
   starting = false;
   const run = issued.kind === 'ok' && issued.run.simVersion === SIM_VERSION && issued.run.segmentFrames === SEGMENT_FRAMES ? issued.run : null;
   runId = run ? run.runId : null;
@@ -160,6 +164,7 @@ async function startGame(): Promise<void> {
 
 function startReplay(replaySeed: number, runs: number[], label: string, segmentFrames: number, segmentSeeds: number[]): void {
   sfx.unlock();
+  armBack();
   replayCodes = expandRuns(runs);
   replayIdx = 0;
   replaySeeds = segmentSeeds;
@@ -179,7 +184,10 @@ function updateBanner(): void {
 }
 
 async function watchFromBoard(entry: api.BoardEntry): Promise<void> {
+  armBack();
+  const epoch = playEpoch;
   const data = await api.fetchReplay(entry.runId);
+  if (epoch !== playEpoch) return;
   // v2(구 랭킹)와 v3(구간 시드) 기록을 모두 재생한다. 모르는 규칙 버전은 재생하지 않는다.
   const rules = data ? rulesFor(data.simVersion) : null;
   if (!data || !rules) {
@@ -558,9 +566,36 @@ const SYNC_ERRORS: Record<string, string> = {
 function togglePause(): void {
   if (mode !== 'play' || finished) return;
   paused = !paused;
+  if (!paused) armBack();
   sfx.setMusic(!paused && sim.phase === 'playing');
   ui.showPause(paused);
 }
+
+// 시작 입력에서 두 항목을 미리 쌓는다. popstate에서 다시 쌓으면 다음 뒤로가기에서 건너뛸 수 있다.
+const standalone = matchMedia('(display-mode: standalone)').matches ||
+  (navigator as Navigator & { standalone?: boolean }).standalone === true;
+let backDepth = history.state?.lastEmberBack ?? 0;
+const menuDepth = standalone ? 1 : 0;
+
+function armBack(depth = menuDepth + 2): void {
+  while (backDepth < depth) {
+    history.pushState({ lastEmberBack: backDepth + 1 }, '');
+    backDepth++;
+  }
+}
+
+window.addEventListener('popstate', (event) => {
+  const previousDepth = backDepth;
+  backDepth = event.state?.lastEmberBack ?? 0;
+  if (backDepth >= previousDepth) return; // 앞으로 가기는 화면을 복원하지 않는다.
+  if (backDepth === menuDepth + 1 && mode === 'play' && !finished && !paused) {
+    togglePause();
+  } else if (mode !== 'menu' || starting) {
+    enterMenu();
+  } else {
+    playEpoch++; // 메뉴를 유지하면서 아직 도착하지 않은 리플레이 응답을 무효화한다.
+  }
+});
 
 kb.onPress = (code) => {
   sfx.unlock();
@@ -667,6 +702,7 @@ try {
 }
 registerServiceWorker();
 enterMenu();
+if (standalone) armBack(menuDepth);
 requestAnimationFrame(loop);
 
 // 개발 빌드 전용 훅: 콘솔에서 상태를 보거나 n틱을 빨리 감는다.

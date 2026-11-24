@@ -4,14 +4,17 @@
 // 검증 요청이 몰려도 메모리와 지연이 무한정 늘지 않게 한다.
 
 import { Worker } from 'node:worker_threads';
+import type { ReplayRules } from '../../shared/replay.ts';
 import type { RunResult } from '../../shared/sim.ts';
 
-export type VerifyFn = (seed: number, runs: number[]) => Promise<RunResult>;
+/** rules를 생략하면 v2 규칙(구간 시드 없음)으로 재실행한다. */
+export type VerifyFn = (seed: number, runs: number[], rules?: ReplayRules) => Promise<RunResult>;
 
 interface Job {
   id: number;
   seed: number;
   runs: number[];
+  rules: ReplayRules | undefined;
   resolve: (r: RunResult) => void;
   reject: (e: Error) => void;
 }
@@ -161,18 +164,18 @@ export class VerifierPool {
       slot.job = job;
       slot.timer = setTimeout(() => this.failSlot(slot, new VerifyTimeoutError('verify timed out')), this.timeoutMs);
       try {
-        slot.worker.postMessage({ id: job.id, seed: job.seed, runs: job.runs });
+        slot.worker.postMessage({ id: job.id, seed: job.seed, runs: job.runs, rules: job.rules });
       } catch (err) {
         this.failSlot(slot, new VerifyError(`verify worker postMessage failed: ${String(err)}`));
       }
     }
   }
 
-  verify: VerifyFn = (seed, runs) => {
+  verify: VerifyFn = (seed, runs, rules) => {
     if (this.closed) return Promise.reject(new VerifyError('verifier pool closed'));
     if (this.queue.length >= this.maxQueue) return Promise.reject(new QueueFullError('verify queue full'));
     return new Promise<RunResult>((resolve, reject) => {
-      this.queue.push({ id: ++this.seq, seed, runs, resolve, reject });
+      this.queue.push({ id: ++this.seq, seed, runs, rules, resolve, reject });
       this.pump();
     });
   };

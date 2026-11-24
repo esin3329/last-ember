@@ -34,6 +34,7 @@ const el = {
   resultStats: $('result-stats'), resultStatus: $('result-status'),
   resultBest: $('result-best'), resultBuild: $('result-build'),
   retry: $('retry'), watch: $('watch'), toMenu: $('tomenu'),
+  resubmit: $<HTMLButtonElement>('resubmit'),
   debug: $('debug'),
 };
 
@@ -271,12 +272,18 @@ export function showResult(v: ResultView): void {
   );
   show(el.retry, v.canRetry);
   show(el.watch, v.canWatch);
+  setResubmit('hidden');
   setStatus('', '');
   show(el.result, true);
 }
 
 export function hideResult(): void {
   show(el.result, false);
+}
+
+export function setResubmit(state: 'hidden' | 'ready' | 'pending'): void {
+  show(el.resubmit, state !== 'hidden');
+  el.resubmit.disabled = state === 'pending';
 }
 
 export function setStatus(text: string, kind: '' | 'ok' | 'bad'): void {

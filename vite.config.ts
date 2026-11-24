@@ -7,6 +7,7 @@ export default defineConfig({
   build: { outDir: '../dist', emptyOutDir: true },
   server: {
     fs: { allow: ['..'] },
-    proxy: { '/api': 'http://localhost:8787' },
+    // 프록시를 거쳐도 개발 서버의 원래 Host를 유지한다.
+    proxy: { '/api': { target: 'http://localhost:8787', changeOrigin: false } },
   },
 });

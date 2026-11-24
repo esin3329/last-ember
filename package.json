@@ -10,6 +10,7 @@
     "dev:server": "node --watch server/src/main.ts",
     "build": "tsc --noEmit && vite build",
     "start": "node server/src/main.ts",
+    "backup": "node scripts/backup.ts",
     "test": "node --test \"shared/test/*.test.ts\" \"client/test/*.test.ts\" \"server/test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "balance": "node scripts/balance.ts",

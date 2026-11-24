@@ -29,6 +29,7 @@ function launch(t: TestContext, shutdownTimeoutMs = QUICK_SHUTDOWN_TIMEOUT_MS): 
       DB_PATH: ':memory:',
       VERIFY_WORKERS: '2',
       TRUST_PROXY: '0',
+      TRUST_PROXY_CIDRS: '',
       SHUTDOWN_TIMEOUT_MS: String(shutdownTimeoutMs),
     },
     silent: true,

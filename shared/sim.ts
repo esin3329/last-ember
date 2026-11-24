@@ -103,7 +103,10 @@ export type Phase = 'playing' | 'levelup' | 'dead' | 'won';
 
 export interface SimState {
   rng: Rng;
-  tick: number;
+  tick: number; // 시뮬레이션 틱. 월드가 실제로 한 번 진행될 때만 오른다.
+  frame: number; // step() 호출 수(입력 프레임). 레벨업 선택 프레임은 frame만 올리고 tick은 올리지 않는다.
+  segmentFrames: number; // 0이면 구간 전환 없음(v2)
+  segment: number; // 지금 진행 중인 구간 번호(0부터)
   phase: Phase;
   player: Player;
   levels: number[]; // 업그레이드별 레벨
@@ -156,12 +159,18 @@ export function xpForLevel(level: number): number {
   return 4 + level * 3 + ((level * level) >> 2);
 }
 
-export function createSim(seed: number, emit = true): SimState {
+/**
+ * segmentFrames > 0이면 v3 규칙이다. step()을 segmentFrames번 부를 때마다 beginSegment()로 새 시드를 넣어야 한다.
+ */
+export function createSim(seed: number, emit = true, segmentFrames = 0): SimState {
   const levels = new Array<number>(UPGRADE_COUNT).fill(0);
   levels[Up.Bolt] = 1;
   const s: SimState = {
     rng: makeRng(seed),
     tick: 0,
+    frame: 0,
+    segmentFrames,
+    segment: 0,
     phase: 'playing',
     player: {
       x: ARENA / 2, y: ARENA / 2, px: ARENA / 2, py: ARENA / 2,
@@ -202,6 +211,22 @@ export function createSim(seed: number, emit = true): SimState {
   return s;
 }
 
+/**
+ * 다음 step()을 부르려면 새 구간 시드가 필요한가. v3에서 입력 프레임이 segmentFrames의 배수만큼
+ * 소비되면 true가 된다(판이 끝났으면 false). 호출한 쪽은 서버가 이전 구간 입력을 확정한 뒤
+ * 받은 시드로 beginSegment()를 부르고, 그전에는 step()을 부르지 않는다.
+ */
+export function segmentDue(s: SimState): boolean {
+  return s.segmentFrames > 0 && s.phase !== 'dead' && s.phase !== 'won' && s.frame >= (s.segment + 1) * s.segmentFrames;
+}
+
+/** 구간 시드로 RNG를 다시 맞춘다. 시드는 int32로 취급한다(JSON/C# int와 같은 값). */
+export function beginSegment(s: SimState, seed: number): void {
+  if (!segmentDue(s)) throw new Error('segment seed is not due');
+  s.rng.s = seed | 0;
+  s.segment++;
+}
+
 function recomputeStats(s: SimState): void {
   const L = s.levels;
   s.dmgMul = 1 + 0.12 * L[Up.Might];
@@ -224,6 +249,8 @@ function clamp(v: number, lo: number, hi: number): number {
 export function step(s: SimState, inp: InputFrame): void {
   s.events.length = 0;
   if (s.phase === 'dead' || s.phase === 'won') return;
+  if (segmentDue(s)) throw new Error('segment seed required: call beginSegment() before step()');
+  s.frame++;
 
   // 레벨업 선택 중에는 월드가 멈추고, 선택 입력만 소비한다.
   if (s.phase === 'levelup') {

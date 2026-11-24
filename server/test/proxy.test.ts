@@ -6,14 +6,13 @@ import { test } from 'node:test';
 import { parseVerifierWorkerCount } from '../src/verifier.ts';
 import { createApp } from '../src/app.ts';
 import { parseShutdownTimeoutMs } from '../src/config.ts';
+import { RANKED_LIMITS } from '../src/ranked.ts';
 import { Store } from '../src/store.ts';
+import { parseTrustProxyConfig } from '../src/trustedProxy.ts';
 
-interface IssueBody {
-  runId?: string;
-  error?: string;
-}
+const sessionLimit = RANKED_LIMITS.ipNewSessions;
 
-async function withApp(trustProxyHops: number | undefined, run: (base: string, store: Store) => Promise<void>): Promise<void> {
+async function withApp(hops: number | undefined, run: (base: string) => Promise<void>): Promise<void> {
   const store = new Store(':memory:');
   const server = createApp({
     store,
@@ -21,48 +20,42 @@ async function withApp(trustProxyHops: number | undefined, run: (base: string, s
       throw new Error('이 테스트에서는 검증을 호출하지 않는다');
     },
     now: () => 0,
-    ...(trustProxyHops === undefined ? {} : { trustProxyHops }),
+    trustProxy: parseTrustProxyConfig({
+      TRUST_PROXY: hops?.toString(),
+      TRUST_PROXY_CIDRS: hops === undefined ? undefined : '127.0.0.1/32,192.0.2.0/24',
+    }),
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    await run(base, store);
+    await run(base);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
     store.close();
   }
 }
 
-async function issue(base: string, forwardedFor: string): Promise<{ status: number; body: IssueBody }> {
+async function issue(base: string, forwardedFor: string): Promise<{ status: number }> {
   const response = await fetch(`${base}/api/runs`, {
     method: 'POST',
     headers: { 'X-Forwarded-For': forwardedFor },
   });
-  return { status: response.status, body: (await response.json()) as IssueBody };
+  await response.arrayBuffer();
+  return { status: response.status };
 }
 
 test('기본 설정에서는 위조 X-Forwarded-For를 무시한다', async () => {
   await withApp(undefined, async (base) => {
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= sessionLimit; i++) {
       assert.equal((await issue(base, `198.51.100.${i}`)).status, 201);
     }
     assert.equal((await issue(base, '203.0.113.1')).status, 429);
   });
 });
 
-test('신뢰 프록시 1홉은 오른쪽 XFF 주소로 제한과 발급 상한을 적용한다', async () => {
-  await withApp(1, async (base, store) => {
-    const first = await issue(base, '203.0.113.1, 198.51.100.10');
-    assert.equal(first.status, 201);
-    assert.ok(first.body.runId);
-
-    for (let i = 2; i <= 4; i++) {
-      assert.equal((await issue(base, `203.0.113.${i}, 198.51.100.10`)).status, 201);
-    }
-    assert.equal(store.getRun(first.body.runId)?.status, 'rejected');
-    assert.equal(store.getRun(first.body.runId)?.reject_reason, 'abandoned');
-
-    for (let i = 5; i <= 20; i++) {
+test('신뢰 프록시 1홉은 오른쪽 XFF 주소로 세션 발급 제한을 적용한다', async () => {
+  await withApp(1, async (base) => {
+    for (let i = 1; i <= sessionLimit; i++) {
       assert.equal((await issue(base, `203.0.113.${i}, 198.51.100.10`)).status, 201);
     }
     assert.equal((await issue(base, '203.0.113.21, 198.51.100.10')).status, 429);
@@ -72,7 +65,7 @@ test('신뢰 프록시 1홉은 오른쪽 XFF 주소로 제한과 발급 상한�
 
 test('신뢰 프록시 2홉은 오른쪽에서 두 번째 XFF 주소를 선택한다', async () => {
   await withApp(2, async (base) => {
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= sessionLimit; i++) {
       assert.equal((await issue(base, `203.0.113.${i}, 198.51.100.20, 192.0.2.${i}`)).status, 201);
     }
     assert.equal((await issue(base, '203.0.113.21, 198.51.100.20, 192.0.2.21')).status, 429);
@@ -116,6 +109,17 @@ test('잘못된 TRUST_PROXY는 DB를 열거나 서버를 시작하기 전에 실
   }
 });
 
+test('TRUST_PROXY에 신뢰 대역이 없으면 서버 시작이 실패한다', () => {
+  const result = spawnSync(process.execPath, ['server/src/main.ts'], {
+    env: { ...process.env, TRUST_PROXY: '1', TRUST_PROXY_CIDRS: '', DB_PATH: ':memory:', PORT: '0' },
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires TRUST_PROXY_CIDRS/);
+  assert.doesNotMatch(result.stdout, /LAST EMBER 서버/);
+});
+
 test('SHUTDOWN_TIMEOUT_MS는 정수 100~600000만 허용한다', () => {
   const message = /SHUTDOWN_TIMEOUT_MS must be an integer between 100 and 600000/;
   for (const value of ['99', '600001', '', 'foo', '1.5', 'Infinity', '9007199254740992']) {
@@ -139,18 +143,16 @@ test('잘못된 SHUTDOWN_TIMEOUT_MS는 DB를 열거나 서버를 시작하기 �
   }
 });
 
-test('동일 IPv6 표기와 IPv4 매핑 표기는 같은 발급 상한과 속도 제한을 공유한다', async () => {
+test('동일 IPv6 표기와 IPv4 매핑 표기는 같은 세션 발급 제한을 공유한다', async () => {
   for (const forms of [
     ['2001:db8::abcd', '2001:0DB8:0:0:0:0:0:ABCD'],
     ['192.0.2.1', '::ffff:c000:201', '::ffff:192.0.2.1'],
     ['fe80::1%eth0', 'fe80:0:0:0:0:0:0:1%eth1'],
   ]) {
-    await withApp(1, async (base, store) => {
-      const first = await issue(base, forms[0]);
-      for (let i = 1; i < 20; i++) {
+    await withApp(1, async (base) => {
+      for (let i = 0; i < sessionLimit; i++) {
         assert.equal((await issue(base, forms[i % forms.length])).status, 201);
       }
-      assert.equal(store.getRun(first.body.runId!)?.reject_reason, 'abandoned');
       assert.equal((await issue(base, forms[0])).status, 429);
     });
   }
@@ -158,7 +160,7 @@ test('동일 IPv6 표기와 IPv4 매핑 표기는 같은 발급 상한과 속도
 
 test('중복 XFF 헤더와 공백은 전송 순서의 오른쪽 주소를 사용한다', async () => {
   await withApp(1, async (base) => {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < sessionLimit; i++) {
       const status = await new Promise<number>((resolve, reject) => {
         const req = request(`${base}/api/runs`, {
           method: 'POST',
@@ -176,10 +178,13 @@ test('중복 XFF 헤더와 공백은 전송 순서의 오른쪽 주소를 사용
   });
 });
 
-test('부족한 홉과 포트 또는 대괄호가 붙은 주소는 소켓 IP로 제한한다', async () => {
+test('빠진 홉, 잘못된 주소, 신뢰하지 않는 프록시에서는 소켓 IP로 제한한다', async () => {
   await withApp(2, async (base) => {
-    const headers = ['198.51.100.1', '198.51.100.1:123, 192.0.2.1', '[2001:db8::1], 192.0.2.1', ', 192.0.2.1'];
-    for (let i = 0; i < 20; i++) {
+    const headers = [
+      '198.51.100.1', '198.51.100.1:123, 192.0.2.1', '[2001:db8::1], 192.0.2.1',
+      ', 192.0.2.1', '198.51.100.2, 203.0.113.10',
+    ];
+    for (let i = 0; i < sessionLimit; i++) {
       assert.equal((await issue(base, headers[i % headers.length])).status, 201);
     }
     assert.equal((await issue(base, headers[0])).status, 429);

@@ -1,7 +1,27 @@
 // 데이터 테이블. 수치 조정은 이 파일만 고치면 된다.
 // 주의: 값을 바꾸면 기존 리플레이와 호환되지 않으므로 SIM_VERSION을 올려야 한다.
 
-export const SIM_VERSION = 2;
+// 규칙 버전.
+//  v2: 시드 하나로 판 전체를 진행한다(구 랭킹 리플레이, 오프라인 플레이).
+//  v3: 서버가 발급하는 랭킹 규칙. 입력 프레임 SEGMENT_FRAMES개마다 RNG를 서버 비공개 시드로 다시 맞춘다.
+//      게임 수치는 v2와 같고 RNG 시드 전환만 다르다.
+// SIM_VERSION은 지금 랭킹이 발급하는 버전이고, 리더보드는 이 버전만 보여 준다.
+export const SIM_VERSION = 3;
+export const LEGACY_SIM_VERSION = 2;
+
+/**
+ * 구간 길이: sim.step()을 부른 횟수, 즉 입력 프레임 수 기준이다. 60프레임은 보통 약 1초다.
+ * 시뮬레이션 틱(60/초)과 다르다. 레벨업 선택 프레임은 입력 프레임 1개를 쓰지만 틱은 올리지 않는다.
+ * 서버는 RLE 입력의 프레임 수만으로 구간 완료를 검증할 수 있다.
+ */
+export const SEGMENT_FRAMES = 60;
+
+/** 버전별 규칙. 모르는 버전이면 null. segmentFrames가 0이면 구간 시드 전환이 없다. */
+export function rulesFor(version: number): { segmentFrames: number } | null {
+  if (version === LEGACY_SIM_VERSION) return { segmentFrames: 0 };
+  if (version === SIM_VERSION) return { segmentFrames: SEGMENT_FRAMES };
+  return null;
+}
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;

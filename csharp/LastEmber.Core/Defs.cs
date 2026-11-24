@@ -54,7 +54,18 @@ namespace LastEmber.Core
 
     public static class Defs
     {
-        public const int SimVersion = 2;
+        // 규칙 버전. shared/defs.ts와 같다. v2는 구간 시드 없음, v3(랭킹)는 SegmentFrames마다 RNG를 새 시드로 맞춘다.
+        public const int SimVersion = 3;
+        public const int LegacySimVersion = 2;
+
+        /// <summary>구간 길이. Step() 호출 수(입력 프레임) 기준(60프레임은 보통 약 1초)이며 시뮬레이션 틱과 다르다.</summary>
+        public const int SegmentFrames = 60;
+
+        /// <summary>버전별 구간 길이. 모르는 버전이면 -1.</summary>
+        public static int SegmentFramesFor(int version)
+        {
+            return version == LegacySimVersion ? 0 : version == SimVersion ? SegmentFrames : -1;
+        }
 
         public const int TickRate = 60;
         public const double DT = 1.0 / TickRate;

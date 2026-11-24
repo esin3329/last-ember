@@ -100,7 +100,22 @@ namespace LastEmber.Core
         const double Rot60C = 0.5, Rot60S = 0.8660254037844386;
 
         public readonly Rng Rng;
-        public int Tick;
+        public int Tick;        // 시뮬레이션 틱. 월드가 실제로 진행될 때만 오른다.
+        public int Frame;       // Step() 호출 수(입력 프레임). 레벨업 선택 프레임은 Frame만 올리고 Tick은 올리지 않는다.
+        public readonly int SegmentFrames; // 0이면 구간 전환 없음(v2)
+        public int Segment;     // 진행 중인 구간 번호(0부터)
+
+        /// <summary>다음 Step() 전에 새 구간 시드가 필요한가. 판이 끝났으면 false.</summary>
+        public bool SegmentDue =>
+            SegmentFrames > 0 && Phase != Phase.Dead && Phase != Phase.Won && Frame >= (Segment + 1) * SegmentFrames;
+
+        /// <summary>구간 시드로 RNG를 다시 맞춘다.</summary>
+        public void BeginSegment(int seed)
+        {
+            if (!SegmentDue) throw new InvalidOperationException("segment seed is not due");
+            Rng.S = seed;
+            Segment++;
+        }
         public Phase Phase = Phase.Playing;
         public readonly Player Player;
         public readonly int[] Levels = new int[Defs.UpgradeCount];
@@ -134,9 +149,13 @@ namespace LastEmber.Core
         readonly List<int> pool = new List<int>();
         readonly List<Blast> blasts = new List<Blast>();
 
-        public Sim(int seed, bool emit = true)
+        /// <summary>
+        /// segmentFrames &gt; 0이면 v3 규칙이다. Step()을 segmentFrames번 부를 때마다 BeginSegment()로 새 시드를 넣어야 한다.
+        /// </summary>
+        public Sim(int seed, bool emit = true, int segmentFrames = 0)
         {
             Rng = new Rng(seed);
+            SegmentFrames = segmentFrames;
             Emit = emit;
             Levels[Up.Bolt] = 1;
             Player = new Player
@@ -180,6 +199,8 @@ namespace LastEmber.Core
         {
             Events.Clear();
             if (Phase == Phase.Dead || Phase == Phase.Won) return;
+            if (SegmentDue) throw new InvalidOperationException("segment seed required: call BeginSegment() before Step()");
+            Frame++;
 
             // 레벨업 선택 중에는 월드가 멈추고, 선택 입력만 소비한다.
             if (Phase == Phase.LevelUp)

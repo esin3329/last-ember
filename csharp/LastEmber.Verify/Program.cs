@@ -48,12 +48,22 @@ static class Program
         foreach (JsonElement run in root.GetProperty("runs").EnumerateArray())
         {
             int seed = run.GetProperty("seed").GetInt32();
+            int version = run.GetProperty("version").GetInt32();
+            int segmentFrames = run.GetProperty("segmentFrames").GetInt32();
+            if (Defs.SegmentFramesFor(version) != segmentFrames)
+            {
+                Console.WriteLine($"FAIL version {version}: fixture segmentFrames {segmentFrames}, C# rules {Defs.SegmentFramesFor(version)}");
+                failures++;
+                continue;
+            }
             var inputs = new List<int>();
             foreach (JsonElement v in run.GetProperty("inputs").EnumerateArray()) inputs.Add(v.GetInt32());
+            var segmentSeeds = new List<int>();
+            foreach (JsonElement v in run.GetProperty("segmentSeeds").EnumerateArray()) segmentSeeds.Add(v.GetInt32());
             JsonElement exp = run.GetProperty("result");
 
             watch.Start();
-            RunResult got = Replay.Simulate(seed, inputs);
+            RunResult got = Replay.Simulate(seed, inputs, segmentFrames, segmentSeeds);
             watch.Stop();
             totalTicks += got.Ticks;
 
@@ -66,8 +76,8 @@ static class Program
                 got.Finished == exp.GetProperty("finished").GetBoolean() &&
                 got.Checksum == exp.GetProperty("checksum").GetUInt32();
 
-            string outcome = got.Won ? "won " : "dead";
-            Console.WriteLine($"{(same ? "ok  " : "FAIL")} seed {seed,11}  {outcome} {got.Ticks,6} ticks  score {got.Score,6}  checksum {got.Checksum}");
+            string outcome = got.Won ? "won " : got.Finished ? "dead" : "open";
+            Console.WriteLine($"{(same ? "ok  " : "FAIL")} v{version} seed {seed,11}  {outcome} {got.Ticks,6} ticks  score {got.Score,6}  checksum {got.Checksum}");
             if (!same)
             {
                 Console.WriteLine($"     expected ticks {exp.GetProperty("ticks").GetInt32()} score {exp.GetProperty("score").GetInt32()} checksum {exp.GetProperty("checksum").GetUInt32()}");

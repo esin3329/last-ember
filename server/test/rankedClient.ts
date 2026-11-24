@@ -58,7 +58,8 @@ export async function playRanked(browser: Browser, clock: Clock, stopAfter = Inf
   const segmentSeeds: number[] = [];
   for (let index = 0; ; index++) {
     const seg = bot.playSegment();
-    clock.advance((seg.frames / 60) * 1000 + 200);
+    // 가짜 시계는 정수 ms로 유지한다. 소수가 되면 발급 이력 경계(issued_at > now - windowMs)가 부동소수 오차로 1ms 어긋난다.
+    clock.advance(Math.ceil((seg.frames / 60) * 1000) + 200);
     const res = await browser.api('POST', `/api/runs/${runId}/segments/${index}`, { inputs: seg.runs, final: seg.final });
     assert.equal(res.status, 200, JSON.stringify(res.json));
     if (seg.final) break;

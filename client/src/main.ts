@@ -9,6 +9,7 @@ import { DT, Kind, SEGMENT_FRAMES, SIM_VERSION, UPGRADE_META, rulesFor } from '.
 import { type InputFrame, InputRecorder, decodeFrame, encodeFrame, expandRuns } from '../../shared/input.ts';
 import { type SimEvent, type SimState, beginSegment, createSim, resultOf, segmentDue, step } from '../../shared/sim.ts';
 import * as api from './api.ts';
+import { registerServiceWorker } from './pwa.ts';
 import { Sfx } from './audio.ts';
 import { Fx } from './fx.ts';
 import { Keyboard } from './keyboard.ts';
@@ -664,6 +665,7 @@ try {
 } catch {
   /* 무시 */
 }
+registerServiceWorker();
 enterMenu();
 requestAnimationFrame(loop);
 

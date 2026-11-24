@@ -9,6 +9,8 @@
 
 **바로 플레이: https://esin3329.github.io/last-ember/** · 미러: https://last-ember-bib.pages.dev (정적 호스팅이라 오프라인 모드로 동작합니다. 리더보드와 서버 검증은 로컬에서 서버를 띄워야 볼 수 있습니다.)
 
+홈 화면에 설치해 오프라인으로도 즐길 수 있습니다([설치·오프라인 조건](#홈-화면에-설치pwa와-오프라인-플레이)).
+
 ![플레이 화면](docs/screenshot.jpg)
 
 ## 실행
@@ -41,6 +43,17 @@ npm run dev
 - Android 설정: 세로, ARM64·IL2CPP, OpenGL ES 3, Android 8.0 이상. 터치 조이스틱·대시·일시정지와 키보드·게임패드를 지원합니다. 화면 배치는 `Screen.safeArea`를 따릅니다.
 - 서버 없이 플레이할 수 있습니다. 랭킹을 사용하려면 시작 씬의 `LastEmber` 오브젝트에서 `Ranked Server`에 기존 Node 서버의 HTTPS 주소를 넣으세요. GitHub Pages 주소는 API 서버가 아닙니다.
 - Android Build Support와 SDK·NDK·OpenJDK가 설치된 에디터에서 `unity build LastEmberUnity --target Android --execute-method LastEmber.UnityClient.Editor.AndroidBuild.Build --output LastEmberUnity/Builds/LastEmber.apk`로 APK를 빌드할 수 있습니다.
+
+### 홈 화면에 설치(PWA)와 오프라인 플레이
+
+웹판은 설치형 웹앱(PWA)입니다. Unity 포팅이 아니라 같은 브라우저 빌드를 `manifest.webmanifest`와 서비스 워커로 감싼 것이며, 플레이 URL은 그대로입니다.
+
+- **설치**: Chrome·Edge(Android/데스크톱)는 주소창의 설치 버튼이나 메뉴의 "앱 설치/홈 화면에 추가", iOS Safari는 공유 → "홈 화면에 추가"를 사용합니다. 설치하면 주소창 없이 standalone으로 실행됩니다. 서비스 워커와 설치는 HTTPS(또는 `localhost`)에서만 동작합니다.
+- **오프라인 조건**: 프로덕션 빌드(`npm run build`)를 HTTPS로 한 번 **온라인에서 끝까지 불러온 뒤**부터 가능합니다. 첫 방문에서 서비스 워커가 빌드 산출물 전체(코드·스프라이트·음원·아이콘)를 받아 두며, 이후에는 네트워크가 없어도 열리고 시작할 수 있습니다. 개발 서버(`npm run dev`)에서는 서비스 워커를 등록하지 않습니다.
+- **랭킹은 캐시하지 않습니다**: `/api/` 요청은 서비스 워커가 가로채지 않아 항상 네트워크로 나갑니다. 서버에 닿지 않으면 기존대로 "오프라인 (기록 안 됨)" 모드로 플레이됩니다.
+- **업데이트**: 새 배포는 별도 캐시로 내려받아 두고, 열려 있는 탭·앱 창이 모두 닫힌 뒤 다시 열 때 적용됩니다(한 화면이 이전/새 빌드 자산을 섞어 쓰지 않도록). 적용 직후 이전 캐시는 삭제됩니다.
+- 루트(`https://last-ember-bib.pages.dev/`)와 하위 경로(`https://esin3329.github.io/last-ember/`)는 모두 상대 경로 기반이라 같은 빌드로 동작합니다. 서비스 워커 정의는 [scripts/pwa-sw.js](scripts/pwa-sw.js), precache 목록·버전 생성은 [scripts/vite-pwa.ts](scripts/vite-pwa.ts)입니다.
+- 한계: 데스크톱 Chromium(headless)에서 하위 경로·루트 서비스 워커 등록, 서버를 끈 상태의 재시작→플레이, 업데이트 시 캐시 교체를 확인했습니다. 실제 스마트폰(Android Chrome 설치 배너, iOS 홈 화면 추가)에서의 설치는 시험하지 못했습니다.
 
 ### 서버 환경 변수
 

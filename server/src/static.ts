@@ -13,6 +13,7 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
 };

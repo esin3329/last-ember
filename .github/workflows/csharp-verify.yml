@@ -1,0 +1,31 @@
+name: C# cross-verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: csharp-verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-csharp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # LastEmber.Verify targets net10.0 (LastEmber.Core is netstandard2.1, built by the SDK).
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      # scripts/fixtures.ts imports only node builtins and shared/*.ts, so no npm ci.
+      - run: npm run verify:csharp

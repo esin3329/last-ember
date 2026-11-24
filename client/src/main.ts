@@ -572,28 +572,31 @@ function togglePause(): void {
 }
 
 // 시작 입력에서 두 항목을 미리 쌓는다. popstate에서 다시 쌓으면 다음 뒤로가기에서 건너뛸 수 있다.
-const standalone = matchMedia('(display-mode: standalone)').matches ||
-  (navigator as Navigator & { standalone?: boolean }).standalone === true;
 let backDepth = history.state?.lastEmberBack ?? 0;
-const menuDepth = standalone ? 1 : 0;
 
-function armBack(depth = menuDepth + 2): void {
-  while (backDepth < depth) {
+function armBack(): void {
+  while (backDepth < 2) {
     history.pushState({ lastEmberBack: backDepth + 1 }, '');
     backDepth++;
   }
+}
+
+function returnToMenu(): void {
+  enterMenu();
+  if (backDepth > 0) history.go(-backDepth);
 }
 
 window.addEventListener('popstate', (event) => {
   const previousDepth = backDepth;
   backDepth = event.state?.lastEmberBack ?? 0;
   if (backDepth >= previousDepth) return; // 앞으로 가기는 화면을 복원하지 않는다.
-  if (backDepth === menuDepth + 1 && mode === 'play' && !finished && !paused) {
+  if (backDepth === 1 && mode === 'play' && !finished && !paused) {
     togglePause();
   } else if (mode !== 'menu' || starting) {
-    enterMenu();
+    returnToMenu();
   } else {
     playEpoch++; // 메뉴를 유지하면서 아직 도착하지 않은 리플레이 응답을 무효화한다.
+    if (backDepth > 0) history.go(-backDepth);
   }
 });
 
@@ -602,8 +605,7 @@ kb.onPress = (code) => {
   if (code === 'KeyM') ui.toast(sfx.toggleMute() ? '음소거' : '소리 켜짐');
   if (code === 'F3') debugOn = !debugOn;
   if (code === 'Escape') {
-    if (mode === 'replay') enterMenu();
-    else if (mode === 'play' && finished) enterMenu();
+    if (mode === 'replay' || (mode === 'play' && finished)) returnToMenu();
     else togglePause();
   }
   if (code === 'Enter' || code === 'NumpadEnter') {
@@ -626,9 +628,9 @@ ui.dom.retry.addEventListener('click', () => void startGame());
 ui.dom.watch.addEventListener('click', () => {
   if (lastRun) startReplay(lastRun.seed, lastRun.runs, '방금 플레이', lastRun.segmentFrames, lastRun.segmentSeeds);
 });
-ui.dom.toMenu.addEventListener('click', enterMenu);
+ui.dom.toMenu.addEventListener('click', returnToMenu);
 ui.dom.resume.addEventListener('click', togglePause);
-ui.dom.quit.addEventListener('click', enterMenu);
+ui.dom.quit.addEventListener('click', returnToMenu);
 setupTouch(canvas, kb, togglePause);
 // 게임패드가 끊기면 자동 일시정지. 이미 일시정지면 그대로 둔다(랭킹 동기화 대기와는 별개 상태).
 kb.onGamepadDisconnect = () => {
@@ -701,8 +703,7 @@ try {
   /* 무시 */
 }
 registerServiceWorker();
-enterMenu();
-if (standalone) armBack(menuDepth);
+returnToMenu();
 requestAnimationFrame(loop);
 
 // 개발 빌드 전용 훅: 콘솔에서 상태를 보거나 n틱을 빨리 감는다.

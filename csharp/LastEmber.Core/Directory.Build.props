@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Unity imports this directory as a local package; keep .NET build outputs outside it. -->
+    <BaseOutputPath>../bin/LastEmber.Core/</BaseOutputPath>
+    <BaseIntermediateOutputPath>../obj/LastEmber.Core/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

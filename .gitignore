@@ -15,5 +15,3 @@ csharp/fixtures.json
 /LastEmberUnity/*.sln
 /LastEmberUnity/*.slnx
 /LastEmberUnity/*.csproj
-/csharp/LastEmber.Core/bin.meta
-/csharp/LastEmber.Core/obj.meta

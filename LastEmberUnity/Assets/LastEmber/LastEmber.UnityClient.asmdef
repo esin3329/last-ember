@@ -1,0 +1,5 @@
+{
+  "name": "LastEmber.UnityClient",
+  "rootNamespace": "LastEmber.UnityClient",
+  "references": ["LastEmber.Core", "Unity.InputSystem", "Unity.TextMeshPro", "UnityEngine.UI"]
+}

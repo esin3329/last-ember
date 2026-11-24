@@ -34,6 +34,14 @@ npm run dev
 | `npm run verify:csharp` | C# 코어가 TypeScript와 같은 결과를 내는지 대조 (.NET SDK 필요) |
 | `npm run backup` | 실행 중인 SQLite DB의 일관된 백업 생성 |
 
+### Unity Android판
+
+`LastEmberUnity/`는 기존 웹판과 별도로 여는 Unity 6.6.10f1 URP 2D 프로젝트입니다. `Assets/LastEmber/LastEmber.unity`가 시작 씬입니다. `../../csharp/LastEmber.Core`를 로컬 Unity 패키지로 참조하므로 저장소 전체를 체크아웃한 상태로 여세요.
+
+- Android 설정: 세로, ARM64·IL2CPP, OpenGL ES 3, Android 8.0 이상. 터치 조이스틱·대시·일시정지와 키보드·게임패드를 지원합니다. 화면 배치는 `Screen.safeArea`를 따릅니다.
+- 서버 없이 플레이할 수 있습니다. 랭킹을 사용하려면 시작 씬의 `LastEmber` 오브젝트에서 `Ranked Server`에 기존 Node 서버의 HTTPS 주소를 넣으세요. GitHub Pages 주소는 API 서버가 아닙니다.
+- Android Build Support와 SDK·NDK·OpenJDK가 설치된 에디터에서 `unity build LastEmberUnity --target Android --execute-method LastEmber.UnityClient.Editor.AndroidBuild.Build --output LastEmberUnity/Builds/LastEmber.apk`로 APK를 빌드할 수 있습니다.
+
 ### 서버 환경 변수
 
 | 변수 | 기본값 | 설명 |

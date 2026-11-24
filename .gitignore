@@ -5,3 +5,15 @@ data
 bin
 obj
 csharp/fixtures.json
+
+/LastEmberUnity/Library/
+/LastEmberUnity/Temp/
+/LastEmberUnity/Logs/
+/LastEmberUnity/UserSettings/
+/LastEmberUnity/Builds/
+/LastEmberUnity/obj/
+/LastEmberUnity/*.sln
+/LastEmberUnity/*.slnx
+/LastEmberUnity/*.csproj
+/csharp/LastEmber.Core/bin.meta
+/csharp/LastEmber.Core/obj.meta

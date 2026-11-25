@@ -5,7 +5,7 @@
 // 그래서 기록한 입력만 다시 넣으면 어디서든 같은 판이 재현된다.
 
 import { botInput } from '../../shared/bot.ts';
-import { DT, Kind, SEGMENT_FRAMES, SIM_VERSION, UPGRADE_META, rulesFor } from '../../shared/defs.ts';
+import { DT, Kind, UPGRADE_META, rulesFor } from '../../shared/defs.ts';
 import { type InputFrame, InputRecorder, decodeFrame, encodeFrame, expandRuns } from '../../shared/input.ts';
 import { type SimEvent, type SimState, beginSegment, createSim, resultOf, segmentDue, step } from '../../shared/sim.ts';
 import * as api from './api.ts';
@@ -60,6 +60,7 @@ let segRecorder = new InputRecorder(); // 현재 구간의 입력(서버로 보�
 let segmentSeeds: number[] = []; // 이번 판에서 쓴 구간 시드(1번 구간부터). 방금 플레이 리플레이용
 let syncing = false; // 서버 확정을 기다리는 동안 시뮬레이션을 멈춘다(사용자 일시정지 paused와 별개)
 let syncNoticeTimer = 0;
+let syncMetrics = { attempts: 0, waitMs: 0 };
 let playEpoch = 0;
 let boardRequest = 0;
 
@@ -105,6 +106,7 @@ function resetWorld(newSim: SimState): void {
   ui.dom.startStatus.classList.add('hidden');
   ui.dom.startStatus.textContent = '';
   syncing = false;
+  syncMetrics = { attempts: 0, waitMs: 0 };
   window.clearTimeout(syncNoticeTimer);
   submission.discard();
   ui.setResubmit('hidden');
@@ -198,7 +200,8 @@ async function startGame(): Promise<void> {
   }
   const issued = await api.issueRun();
   if (epoch !== playEpoch) return;
-  const run = issued.kind === 'ok' && issued.run.simVersion === SIM_VERSION && issued.run.segmentFrames === SEGMENT_FRAMES ? issued.run : null;
+  const offered = issued.kind === 'ok' ? issued.run : null;
+  const run = offered && offered.segmentFrames > 0 && rulesFor(offered.simVersion)?.segmentFrames === offered.segmentFrames ? offered : null;
   runId = run ? run.runId : null;
   seed = run ? run.seed : randomSeed();
   playSegmentFrames = run ? run.segmentFrames : 0;
@@ -249,7 +252,7 @@ async function watchFromBoard(entry: api.BoardEntry): Promise<void> {
   const epoch = playEpoch;
   const data = await api.fetchReplay(entry.runId);
   if (epoch !== playEpoch || starting) return;
-  // v2(구 랭킹)와 v3(구간 시드) 기록을 모두 재생한다. 모르는 규칙 버전은 재생하지 않는다.
+  // 알려진 버전의 구간 길이로만 리플레이한다.
   const rules = data ? rulesFor(data.simVersion) : null;
   if (!data || !rules) {
     ui.toast('리플레이를 불러올 수 없습니다');
@@ -342,8 +345,11 @@ async function syncSegment(): Promise<void> {
   if (id) {
     // 왕복이 짧으면 안내를 띄우지 않는다.
     syncNoticeTimer = window.setTimeout(() => ui.setBanner('서버와 동기화 중…'), 500);
-    const res = await api.commitSegment(id, segIndex, segRecorder.runs, false);
+    const startedAt = performance.now();
+    syncMetrics.attempts = 0;
+    const res = await api.commitSegment(id, segIndex, segRecorder.runs, false, undefined, syncMetrics);
     if (epoch !== playEpoch) return; // 그 사이 다른 화면으로 넘어갔다
+    syncMetrics.waitMs = performance.now() - startedAt;
     window.clearTimeout(syncNoticeTimer);
     ui.setBanner(null);
     if (res.ok && res.next) {
@@ -743,7 +749,7 @@ function loop(now: number): void {
 
   if (!paused && !finished) advance(dt);
   if (!paused) fx.update(dt);
-  sfx.setMusic(mode !== 'menu' && !paused && !finished && !syncing && sim.phase === 'playing');
+  sfx.setMusic(mode !== 'menu' && !paused && !finished && sim.phase === 'playing');
 
   const waiting = finished || paused || syncing || sim.phase === 'levelup';
   renderer.draw(sim, fx, {
@@ -770,6 +776,7 @@ function loop(now: number): void {
             `enemies ${sim.enemies.length} (drawn ${renderer.drawn})\n` +
             `bullets ${sim.bullets.length}  gems ${sim.gems.length}\n` +
             `particles ${fx.particles.length}\n` +
+            `rank sync ${playSegmentFrames}f · ${syncing ? '대기 중' : `${syncMetrics.waitMs.toFixed(0)}ms`} · 재시도 ${Math.max(0, syncMetrics.attempts - 1)}회\n` +
             `replay ${recorder.runs.length / 2} runs / ${recorder.total} ticks`
         : null,
     );

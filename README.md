@@ -7,7 +7,7 @@
 - 서버: Node.js 24 기본 모듈만 사용 (`node:http`, `node:sqlite`, `node:worker_threads`)
 - 플레이어·적 6종·전장 배경·강화 아이콘 14종은 PNG, 점화·돌진 경고음은 WAV, 반복 배경음은 MP3를 사용하고, 나머지 전투 그래픽과 효과음은 코드로 생성
 
-**바로 플레이: https://esin3329.github.io/last-ember/** · 미러: https://last-ember-bib.pages.dev (정적 호스팅이라 오프라인 모드로 동작합니다. 리더보드와 서버 검증은 로컬에서 서버를 띄워야 볼 수 있습니다.)
+**[바로 플레이](https://esin3329.github.io/last-ember/)** · **[Cloudflare 미러](https://last-ember-bib.pages.dev/)** — 두 주소는 랭킹 서버 없는 정적 배포입니다. 랭킹을 테스트하려면 [Windows 미니 PC에서 호스팅](#windows-미니-pc에서-랭킹-호스팅)하세요.
 
 홈 화면에 설치해 오프라인으로도 즐길 수 있습니다([설치·오프라인 조건](#홈-화면에-설치pwa와-오프라인-플레이)).
 
@@ -18,10 +18,7 @@
 Node.js 24 이상이 필요합니다.
 
 ```bash
-npm install
-```
-
-```bash
+npm ci
 npm run dev
 ```
 
@@ -35,6 +32,43 @@ npm run dev
 | `npm run balance -- 30` | 봇으로 30판을 헤드리스로 돌려 난이도·성능 측정 |
 | `npm run verify:csharp` | C# 코어가 TypeScript와 같은 결과를 내는지 대조 (.NET SDK 필요) |
 | `npm run backup` | 실행 중인 SQLite DB의 일관된 백업 생성 |
+
+### Windows 미니 PC에서 랭킹 호스팅
+
+Windows 호스트에서 Node 서버 한 개가 게임 파일과 `/api`를 같은 주소로 제공합니다. VPS·Firebase나 공유기 포트 포워딩은 필요 없습니다. 아래 명령은 미니 PC의 저장소 루트에서 PowerShell로 실행합니다.
+
+**1. 빌드하고 로컬 서버 시작** — Node.js 24와 [cloudflared](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)를 준비하세요. `npm ci`와 `npm run build`는 첫 실행 및 코드 업데이트 때 수행합니다.
+
+```powershell
+npm ci
+npm run build
+# 위 두 명령이 성공한 뒤 실행합니다.
+$env:HOST = '127.0.0.1'
+$env:PORT = '8787'
+$env:DB_PATH = Join-Path $env:LOCALAPPDATA 'LastEmber\runs.db'
+$env:TRUST_PROXY = '1'
+$env:TRUST_PROXY_CIDRS = '127.0.0.1/32'
+npm start
+```
+
+`server_started` 로그의 `host`는 `127.0.0.1`, `servingClient`는 `true`여야 합니다. 다른 PowerShell에서 `Invoke-RestMethod http://127.0.0.1:8787/api/health`를 실행해 `ok: true`를 확인하세요. 이 설정은 같은 PC의 `cloudflared`만 앞단 프록시로 사용하는 경우입니다. 서버 포트를 LAN이나 인터넷에 열지 말고, DB는 동기화 폴더가 아닌 로컬 디스크에 두세요.
+
+**2. 임시 링크로 외부 테스트** — 서버를 켜 둔 채 다른 PowerShell에서 실행합니다.
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+콘솔에 표시된 `https://…trycloudflare.com` 주소에서 `/api/health`가 `ok: true`인지 확인합니다. 이어서 휴대폰의 Wi-Fi를 끄고 **같은 HTTPS 주소**에서 한 판을 시작해, 결과 화면에 **검증 완료**가 뜨고 리더보드에서 리플레이가 열리는지 확인하세요. Quick Tunnel은 [테스트 전용](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)이고 링크를 받은 사람은 누구나 접속할 수 있습니다. 터널을 다시 실행하면 주소가 바뀔 수 있으므로 이 주소로 PWA를 배포하거나 설치를 안내하지 않습니다. 종료할 때는 터널을 먼저, 서버를 나중에 `Ctrl+C`로 내립니다.
+
+**3. 계속 운영할 때** — Cloudflare에서 관리하는 도메인이 있다면 [고정 연결을 만들고](https://developers.cloudflare.com/tunnel/get-started/) `play.내도메인`을 `http://127.0.0.1:8787`에 연결하세요. `/api/*`는 CDN 캐시 규칙에서 제외합니다. 미니 PC 절전을 끄고, 재부팅 후 Node 서버와 터널이 자동 시작하도록 구성한 다음 위의 외부 테스트를 다시 하세요. 같은 DB로 `npm start`를 두 번 띄우지 마세요. 서버가 꺼지거나 주소 연결이 끊겨도 기존 GitHub·Cloudflare 정적판은 별도로 플레이할 수 있습니다.
+
+**백업:** 서버가 켜져 있어도 아래 명령으로 일관된 사본을 만들 수 있습니다. 완성된 백업을 미니 PC 밖에도 보관하세요. 복원과 종료 절차는 [백업과 로그](#백업과-로그)를 참고하세요.
+
+```powershell
+$dataDir = Join-Path $env:LOCALAPPDATA 'LastEmber'
+npm run backup -- --db (Join-Path $dataDir 'runs.db') --out (Join-Path $dataDir 'backups')
+```
 
 ### Unity Android판
 
@@ -61,6 +95,7 @@ npm run dev
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `PORT` | `8787` | HTTP 포트 |
+| `HOST` | 미설정(Node 기본 바인딩) | HTTP 수신 주소. 같은 PC에서 터널을 연결할 때는 `127.0.0.1` |
 | `DB_PATH` | `data/runs.db` | SQLite 파일 경로 (`:memory:`로 메모리 DB 사용) |
 | `VERIFY_WORKERS` | 자동 (`1`–`4`) | 검증 워커 수 (명시 시 `1`–`32` 정수, 범위 밖·비정수는 시작 실패) |
 | `TRUST_PROXY` | `0` | 신뢰할 프록시 홉 수 (`0`–`32` 정수, 범위 밖·비숫자는 시작 실패). `0`은 `X-Forwarded-For`를 무시합니다. 소켓 피어를 첫 홉으로 세므로 `1`은 XFF 오른쪽 첫 주소, `2`는 오른쪽 두 번째 주소를 사용합니다. |
@@ -131,7 +166,7 @@ npm run dev
    - **구간 길이의 단위는 틱이 아니라 입력 프레임입니다.** 시뮬레이션 틱은 초당 60개이지만, 레벨업 선택 프레임은 입력 프레임 하나를 쓰면서 틱은 올리지 않습니다. 서버는 시뮬레이션을 돌리지 않고 RLE 프레임 수만으로 구간 완료를 검증합니다.
    - **같은 입력의 재전송만 멱등.** 응답이 유실돼 같은 구간을 다시 보내면 같은 응답(같은 다음 시드)을 받고, 이미 확정된 구간에 다른 입력을 보내면 `409 segment_conflict`로 거절합니다. 순서를 건너뛰면 `409 segment_order`입니다.
    - **기한.** 서버는 시드를 보낸 시각부터 입력이 도착할 때까지를 잽니다. 실제 플레이 시간의 0.9배보다 빠르면 `425 too_early`(저장하지 않고 시드도 주지 않음, 기다렸다가 같은 입력을 다시 보내면 됨), 정상 플레이 시간 + 5초를 넘기면 `422 timeout`으로 그 판을 거절합니다. 일시정지·레벨업 선택·네트워크 지연이 이 안에서만 허용되며 클라이언트가 선언한 값으로 기한을 늘릴 수 없습니다. 입력 없이 90초가 지난 판은 주기 정리에서 만료해 한도 슬롯을 돌려받고, 발급 후 20분이 지난 판은 `422 expired`입니다.
-   - **클라이언트.** 구간 전송은 전체 3초 안에서 네트워크 오류·5xx·`425`만 같은 입력으로 다시 보내고, 그래도 안 되면 서버 없이 로컬 시드로 이어 가며 그 판은 기록되지 않습니다.
+   - **클라이언트.** 웹의 일반 구간은 시도당 최대 3초, 재시도를 포함해 전체 최대 6초를 사용합니다. 네트워크 오류·5xx·`425`만 같은 입력으로 재전송하고, 그래도 안 되면 로컬 시드로 이어 가며 그 판은 기록되지 않습니다.
 4. **최종 제출.** 마지막 구간(`final: true`)이 확정된 판만 `POST /api/runs/:id/submit`으로 이름·점수·체크섬을 주장할 수 있고, 제출 본문의 입력은 읽지 않습니다. 서버가 저장한 구간 입력과 자신이 파생한 구간 시드로만 같은 시뮬레이션을 재실행하고, 결과의 점수와 체크섬이 일치할 때만 리더보드에 올립니다. 검증이 끝나면 구간 원본은 지우고 합친 입력과 공개된 구간 시드만 리플레이용으로 남깁니다.
 5. 검증된 판은 누구나 리더보드에서 리플레이로 다시 볼 수 있습니다. 영상이 아니라 입력 기록을 재생하는 것입니다.
 

@@ -13,6 +13,7 @@ import { parseVerifierWorkerCount, VerifierPool } from './verifier.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const port = Number(process.env.PORT ?? 8787);
+const host = process.env.HOST;
 const dbPath = process.env.DB_PATH ?? resolve(root, 'data/runs.db');
 const workers = parseVerifierWorkerCount(
   process.env.VERIFY_WORKERS,
@@ -45,10 +46,11 @@ const server = createApp({
   log: (event) => writeLog(event, event.event === 'request_error' ? 'error' : 'info'),
 });
 
-server.listen(port, () => {
+server.listen({ port, host }, () => {
   const bound = server.address();
   writeLog({
     event: 'server_started',
+    host: typeof bound === 'object' && bound !== null ? bound.address : host,
     port: typeof bound === 'object' && bound !== null ? bound.port : port,
     workers,
     servingClient,

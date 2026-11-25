@@ -5,7 +5,7 @@ export type AppLogEvent =
   | { event: 'request_error'; message: string };
 
 type ServerLogEvent = AppLogEvent
-  | { event: 'server_started'; port: number; workers: number; servingClient: boolean; message: string }
+  | { event: 'server_started'; host?: string; port: number; workers: number; servingClient: boolean; message: string }
   | { event: 'verifier_fatal'; message: string }
   | { event: 'shutdown_timeout'; timeoutMs: number; message: string };
 

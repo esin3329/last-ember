@@ -26,15 +26,17 @@ const el = {
   boss: $('boss'), bossFill: $('bossfill'), build: $('build'),
   combo: $('combo'), mult: $('mult'), comboBox: $('combo-box'),
   banner: $('banner'), toast: $('toast'),
-  menu: $('menu'), name: $<HTMLInputElement>('name'), start: $<HTMLButtonElement>('start'),
-  net: $('net'), board: $('board'),
+  menu: $('menu'), name: $<HTMLInputElement>('name'), tutorial: $<HTMLButtonElement>('start'),
+  ranked: $<HTMLButtonElement>('ranked-start'), startStatus: $('start-status'),
+  net: $('net'), board: $('board'), runMode: $('run-mode'), replayExit: $('replay-exit'),
   levelup: $('levelup'), cards: $('cards'),
-  pause: $('pause'), resume: $('resume'), quit: $('quit'),
+  pause: $('pause'), pauseStatus: $('pause-status'), resume: $('resume'), quit: $('quit'),
   result: $('result'), resultTitle: $('result-title'), resultScore: $('result-score'),
   resultStats: $('result-stats'), resultStatus: $('result-status'),
   resultBest: $('result-best'), resultBuild: $('result-build'),
-  retry: $('retry'), watch: $('watch'), toMenu: $('tomenu'),
+  retry: $<HTMLButtonElement>('retry'), watch: $('watch'), toMenu: $('tomenu'),
   resubmit: $<HTMLButtonElement>('resubmit'),
+  tutorialComplete: $('tutorial-complete'), tutorialDone: $('tutorial-done'),
   debug: $('debug'),
 };
 
@@ -239,6 +241,7 @@ export function hideLevelUp(): void {
 
 // ── 일시정지 / 결과 ──
 export function showPause(on: boolean): void {
+  el.levelup.inert = on;
   show(el.pause, on);
 }
 

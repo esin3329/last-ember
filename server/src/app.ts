@@ -65,6 +65,8 @@ class HttpError extends Error {
 
 // 구간 입력(60프레임 RLE)과 제출 본문(이름·점수·체크섬)은 모두 작다.
 const MAX_BODY = 4 * 1024;
+// 최대 RLE: 프레임마다 최장 6바이트("127,1,")와 결과 필드.
+const MAX_FINAL_BODY = MAX_RUN_FRAMES * 6 + MAX_BODY;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** 구간을 플레이하는 데 최소한 걸려야 하는 시간 비율과 여유. 실제 60Hz보다 빠른 제출을 막는다. */
@@ -208,7 +210,8 @@ export function createApp(deps: AppDeps): Server {
     if (method === 'POST' && path === '/api/runs') {
       requireSameSite(req);
       const version = Number(url.searchParams.get('version') ?? SIM_VERSION);
-      if (version !== SIM_VERSION && version !== WEB_SIM_VERSION) throw new HttpError(400, 'unknown_version');
+      const rules = rulesFor(version);
+      if (!rules || (rules.segmentFrames === 0 && version !== WEB_SIM_VERSION)) throw new HttpError(400, 'unknown_version');
       if (!issueLimit.take(ip, now())) throw new HttpError(429, 'rate_limited');
       const known = existingSession(req);
       const token = known ? readSessionToken(req)! : newSessionToken();
@@ -233,7 +236,7 @@ export function createApp(deps: AppDeps): Server {
       return send(
         res,
         201,
-        { runId, seed, simVersion: version, segmentFrames: rulesFor(version)!.segmentFrames },
+        { runId, seed, simVersion: version, segmentFrames: rules.segmentFrames },
         { 'Set-Cookie': sessionCookie(token, isSecure(req)) },
       );
     }
@@ -281,7 +284,8 @@ export function createApp(deps: AppDeps): Server {
         if (!submitLimit.take(ip, now())) throw new HttpError(429, 'rate_limited');
         const session = existingSession(req);
         if (!session) throw new HttpError(403, 'no_session');
-        const body = (await readJson(req)) as Record<string, unknown>;
+        const issued = ownedRun(id, session);
+        const body = (await readJson(req, issued.sim_version === WEB_SIM_VERSION ? MAX_FINAL_BODY : MAX_BODY)) as Record<string, unknown>;
         // 본문을 읽는 동안 판 상태가 바뀔 수 있으므로 판은 본문을 읽은 뒤에 불러온다.
         return submit(ownedRun(id, session), body, res);
       }
@@ -373,14 +377,14 @@ export function createApp(deps: AppDeps): Server {
 
   async function submit(run: RunRow, body: Record<string, unknown>, res: ServerResponse): Promise<void> {
     const id = run.id;
-    // 1) 형식. 입력은 받지 않는다: 점수 검증은 서버가 저장한 구간 입력만 쓴다.
+    // 구간 방식은 서버에 저장된 입력만 사용한다. v5는 종료 요청에 전체 입력을 담는다.
     const claimedScore = body?.score;
     const claimedSum = body?.checksum;
     if (!Number.isInteger(claimedScore) || !Number.isInteger(claimedSum)) {
       throw new HttpError(400, 'invalid_payload');
     }
     const segmentFrames = rulesFor(run.sim_version)?.segmentFrames;
-    if (!segmentFrames) throw new HttpError(409, 'version_mismatch');
+    if (segmentFrames === undefined || (segmentFrames === 0 && run.sim_version !== WEB_SIM_VERSION)) throw new HttpError(409, 'version_mismatch');
     // 같은 점수·체크섬의 재전송은 응답이 유실된 성공 제출로 보고 같은 결과를 다시 돌려준다.
     if (run.status === 'verified' && run.score === claimedScore && run.checksum === claimedSum) {
       return send(res, 200, {
@@ -394,7 +398,21 @@ export function createApp(deps: AppDeps): Server {
     }
     const closed = closedRunError(run);
     if (closed) throw closed;
-    if (run.status === 'issued') throw new HttpError(409, 'not_sealed');
+    if (run.sim_version === WEB_SIM_VERSION) {
+      const current = now();
+      if (current - run.issued_at > limits.maxRunAgeMs) expire(run);
+      const frames = countTicks(body.inputs, MAX_RUN_FRAMES);
+      if (frames < 1) throw new HttpError(400, 'invalid_payload');
+      const inputs = JSON.stringify(normalizeRuns(body.inputs as number[]));
+      if (run.status === 'issued') {
+        if (!store.appendSegment(id, 0, inputs, frames, true, current)) throw new HttpError(409, 'already_submitted');
+        run = store.getRun(id)!;
+      } else if (store.getSegment(id, 0)?.inputs !== inputs) {
+        throw new HttpError(409, 'segment_conflict');
+      }
+    } else if (run.status === 'issued') {
+      throw new HttpError(409, 'not_sealed');
+    }
 
     // 2) 한 번만 제출 가능 (원자적 선점)
     if (!store.claim(id)) {

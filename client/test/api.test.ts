@@ -1,8 +1,8 @@
-// 최종 제출 흐름(마지막 구간 확정 + 제출)의 재시도 규칙. fetch를 가짜로 바꿔 서버 응답 유실·검증 중 상황을 재현한다.
+// 전체 입력을 포함한 최종 제출의 응답 유실·검증 중 재시도 시나리오.
 
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { submitRun, type FinalSubmitState } from '../src/api.ts';
+import { submitRun } from '../src/api.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -11,11 +11,11 @@ afterEach(() => {
 
 type Reply = [status: number, body: unknown] | 'network';
 
-/** 요청마다 순서대로 정해 둔 응답을 돌려준다. 요청 경로를 기록한다. */
-function fakeServer(replies: Reply[]): string[] {
-  const calls: string[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push(String(input));
+/** 요청 순서와 본문을 기록하며 미리 정한 응답을 반환한다. */
+function fakeServer(replies: Reply[]): { path: string; body: unknown }[] {
+  const calls: { path: string; body: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ path: String(input), body: JSON.parse(String(init?.body)) });
     const next = replies.shift();
     if (!next) throw new Error(`예상하지 못한 요청: ${String(input)}`);
     if (next === 'network') throw new TypeError('fetch failed');
@@ -24,37 +24,18 @@ function fakeServer(replies: Reply[]): string[] {
   return calls;
 }
 
-const final = { index: 7, runs: [4, 20] };
-const payload = { name: '나', score: 100, checksum: 5 };
+const payload = { name: '나', score: 100, checksum: 5, inputs: [4, 20] };
 const ok = { ok: true, name: '나', score: 100, rank: 2 };
-const ack = { ok: true, index: 7, final: true, next: null };
 
-test('최종 구간 ACK를 받은 뒤의 재시도는 구간을 다시 보내지 않는다', async () => {
-  const state: FinalSubmitState = { finalCommitted: false };
-  const calls = fakeServer([[200, ack], 'network', [200, ok]]);
-  assert.deepEqual(await submitRun('run', final, payload, state), { ok: false, error: 'network' });
-  assert.equal(state.finalCommitted, true);
-  assert.deepEqual(await submitRun('run', final, payload, state), ok);
-  assert.deepEqual(calls, ['/api/runs/run/segments/7', '/api/runs/run/submit', '/api/runs/run/submit']);
+test('응답 유실 후에도 같은 전체 입력을 최종 제출로 다시 보낸다', async () => {
+  const calls = fakeServer(['network', [200, ok]]);
+  assert.deepEqual(await submitRun('run', payload), { ok: false, error: 'network' });
+  assert.deepEqual(await submitRun('run', payload), ok);
+  assert.deepEqual(calls, Array.from({ length: 2 }, () => ({ path: '/api/runs/run/submit', body: payload })));
 });
 
-test('ACK가 유실돼 구간을 다시 보냈는데 이미 검증된 판이면 제출로 넘어가 같은 성공 응답을 받는다', async () => {
-  const state: FinalSubmitState = { finalCommitted: false };
+test('검증 중이면 같은 본문으로 결과를 다시 요청한다', async () => {
   const calls = fakeServer([[409, { error: 'already_submitted' }], [200, ok]]);
-  assert.deepEqual(await submitRun('run', final, payload, state), ok);
-  assert.deepEqual(calls, ['/api/runs/run/segments/7', '/api/runs/run/submit']);
-});
-
-test('다른 요청이 검증 중이면 잠시 뒤 같은 제출을 다시 보내 결과를 회수한다', async () => {
-  const calls = fakeServer([[200, ack], [409, { error: 'already_submitted' }], [200, ok]]);
-  assert.deepEqual(await submitRun('run', final, payload), ok);
-  assert.equal(calls.filter((c) => c.endsWith('/submit')).length, 2);
-});
-
-test('구간 확정이 만료·무효화로 거절되면 제출하지 않고 그대로 돌려준다', async () => {
-  const state: FinalSubmitState = { finalCommitted: false };
-  const calls = fakeServer([[422, { error: 'timeout' }]]);
-  assert.deepEqual(await submitRun('run', final, payload, state), { ok: false, error: 'timeout' });
-  assert.equal(state.finalCommitted, false);
-  assert.deepEqual(calls, ['/api/runs/run/segments/7']);
+  assert.deepEqual(await submitRun('run', payload), ok);
+  assert.deepEqual(calls, Array.from({ length: 2 }, () => ({ path: '/api/runs/run/submit', body: payload })));
 });

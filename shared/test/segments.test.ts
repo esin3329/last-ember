@@ -10,12 +10,13 @@ import { BotRun, playBot } from './helpers.ts';
 const seedFor = (index: number): number => (Math.imul(index + 1, 0x9e3779b1) ^ 0x5bd1e995) | 0;
 const framesOf = (runs: number[]): number => runs.reduce((n, v, i) => (i % 2 === 1 ? n + v : n), 0);
 
-test('rulesFor: 기존 리플레이와 180프레임 웹 랭킹의 구간 길이를 구분한다', () => {
+test('rulesFor: 버전별 구간 길이와 종료 제출 규칙을 구분한다', () => {
   assert.deepEqual(rulesFor(2), { segmentFrames: 0 });
   assert.deepEqual(rulesFor(3), { segmentFrames: 60 });
   assert.equal(rulesFor(1), null);
   assert.deepEqual(rulesFor(4), { segmentFrames: 180 });
-  assert.equal(rulesFor(5), null);
+  assert.deepEqual(rulesFor(5), { segmentFrames: 0 });
+  assert.equal(rulesFor(6), null);
 });
 
 test('구간 경계는 틱이 아니라 입력 프레임 기준이다(레벨업 선택 프레임은 틱을 올리지 않는다)', () => {

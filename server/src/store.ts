@@ -4,6 +4,7 @@
 // 세션·발급 한도·구간 입력이 모두 이 DB에 있어서 프로세스를 다시 띄워도 한도가 초기화되지 않는다.
 
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { WEB_SIM_VERSION } from '../../shared/defs.ts';
 import { RANKED_LIMITS, type RankedLimits } from './ranked.ts';
 
 export type RunStatus = 'issued' | 'sealed' | 'verifying' | 'verified' | 'rejected';
@@ -208,10 +209,10 @@ export class Store {
       // 만료: 입력이 끊긴 진행 중 판, 제출 기한이 지난 판. 구간 입력은 바로 지운다.
       expireSegments: p(`DELETE FROM run_segments WHERE run_id IN (
                            SELECT id FROM runs WHERE
-                             (status = 'issued' AND (COALESCE(last_activity, issued_at) < ? OR issued_at < ?)) OR
+                             (status = 'issued' AND ((sim_version != ${WEB_SIM_VERSION} AND COALESCE(last_activity, issued_at) < ?) OR issued_at < ?)) OR
                              (status = 'sealed' AND issued_at < ?))`),
       expire: p(`UPDATE runs SET status = 'rejected', reject_reason = 'expired', secret = NULL, submitted_at = ? WHERE
-                   (status = 'issued' AND (COALESCE(last_activity, issued_at) < ? OR issued_at < ?)) OR
+                   (status = 'issued' AND ((sim_version != ${WEB_SIM_VERSION} AND COALESCE(last_activity, issued_at) < ?) OR issued_at < ?)) OR
                    (status = 'sealed' AND issued_at < ?)`),
       purge: p(`DELETE FROM runs WHERE
                  (status IN ${OPEN} AND issued_at < ?) OR

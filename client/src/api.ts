@@ -45,10 +45,6 @@ export interface ReplayData {
   inputs: number[];
 }
 
-export type SegmentResult =
-  | { ok: true; final: boolean; next: { index: number; seed: number } | null }
-  | { ok: false; error: string };
-
 async function call<T>(method: string, path: string, body?: unknown, timeoutMs = 4000): Promise<{ status: number; data: T } | null> {
   try {
     const res = await fetch(path, {
@@ -76,9 +72,7 @@ export async function issueRun(): Promise<IssueOutcome> {
 }
 
 export async function fetchBoard(): Promise<BoardEntry[] | null> {
-  const path = '/api/leaderboard?limit=10';
-  let r = await call<{ entries: BoardEntry[]; error?: string }>('GET', `${path}&version=${WEB_SIM_VERSION}`);
-  if (r?.status === 400 && r.data.error === 'unknown_version') r = await call('GET', path);
+  const r = await call<{ entries: BoardEntry[] }>('GET', `/api/leaderboard?limit=10&version=${WEB_SIM_VERSION}`);
   return r && r.status === 200 ? r.data.entries : null;
 }
 
@@ -87,72 +81,16 @@ export async function fetchReplay(runId: string): Promise<ReplayData | null> {
   return r && r.status === 200 ? r.data : null;
 }
 
-/** 구간 전송 한 번에 쓸 수 있는 전체 시간(재시도 포함). 이 시간이 지나면 서버 없이 로컬로 이어간다. */
-export const SEGMENT_DEADLINE_MS = 6000;
-const SEGMENT_ATTEMPT_MS = 3000;
-
-/**
- * 구간 입력을 서버에 확정하고 다음 구간 시드를 받는다. 같은 입력의 재전송은 서버가 같은 응답을 돌려주므로
- * 네트워크 오류·시간 초과·서버 5xx·너무 이른 요청(425)만 deadline 안에서 다시 보낸다.
- * 그 밖의 오류(만료, 무효화, 충돌 등)는 다시 보내도 같은 결과이므로 곧바로 돌려준다.
- */
-export async function commitSegment(
-  runId: string,
-  index: number,
-  runs: number[],
-  final: boolean,
-  deadlineMs = SEGMENT_DEADLINE_MS,
-  metrics?: { attempts: number },
-): Promise<SegmentResult> {
-  const deadline = performance.now() + deadlineMs;
-  let lastError = 'network';
-  for (;;) {
-    const remaining = deadline - performance.now();
-    if (remaining <= 0) return { ok: false, error: lastError };
-    if (metrics) metrics.attempts++;
-    const r = await call<{ final?: boolean; next?: { index: number; seed: number } | null; error?: string; retryAfterMs?: number }>(
-      'POST',
-      `/api/runs/${runId}/segments/${index}`,
-      { inputs: runs, final },
-      Math.min(SEGMENT_ATTEMPT_MS, remaining),
-    );
-    if (r && r.status === 200) return { ok: true, final: r.data.final === true, next: r.data.next ?? null };
-    if (r && r.status < 500 && r.status !== 425) return { ok: false, error: r.data.error ?? 'unknown' };
-    lastError = r ? (r.data.error ?? 'server_busy') : 'network';
-    const wait = r?.status === 425 ? Math.min(r.data.retryAfterMs ?? 500, 2000) : 300;
-    if (deadline - performance.now() <= wait) return { ok: false, error: lastError };
-    await new Promise((resolve) => setTimeout(resolve, wait));
-  }
-}
-
-/** 최종 제출 재시도 사이에 유지하는 상태. 마지막 구간을 서버가 받았다는 확인(ACK)을 기억한다. */
-export interface FinalSubmitState {
-  finalCommitted: boolean;
-}
 
 /** 검증이 진행 중일 때(`already_submitted`) 같은 제출을 잠시 더 보내 보는 전체 시간과 간격. */
 const SUBMIT_POLL_MS = 12_000;
 const SUBMIT_POLL_INTERVAL_MS = 1000;
 
-/**
- * 판 끝: 마지막 구간을 확정한 뒤 점수·체크섬을 제출한다. 서버는 저장한 입력으로만 검증한다.
- * 같은 `state` 객체와 인자로 다시 부르면 안전하다.
- *  - 마지막 구간 ACK를 받았으면 이후 재시도에서는 구간을 다시 보내지 않는다.
- *  - ACK가 유실돼 구간을 다시 보냈는데 판이 이미 제출·검증 단계(`already_submitted`)면 구간은 이미 받은 것이므로 제출로 넘어간다.
- *  - 이미 검증된 같은 점수·체크섬의 제출은 서버가 같은 성공 응답을 다시 준다.
- *  - 다른 요청이 검증 중이라 `already_submitted`가 오면 짧게 간격을 두고 같은 제출을 다시 보내 결과를 회수한다.
- */
+/** 판이 끝나면 전체 입력을 한 번에 제출한다. 같은 페이로드로 재시도할 수 있다. */
 export async function submitRun(
   runId: string,
-  finalSegment: { index: number; runs: number[] },
-  payload: { name: string; score: number; checksum: number },
-  state: FinalSubmitState = { finalCommitted: false },
+  payload: { name: string; score: number; checksum: number; inputs: readonly number[] },
 ): Promise<SubmitOk | { ok: false; error: string }> {
-  if (!state.finalCommitted) {
-    const committed = await commitSegment(runId, finalSegment.index, finalSegment.runs, true, 15000);
-    if (!committed.ok && committed.error !== 'already_submitted') return committed;
-    state.finalCommitted = true;
-  }
   const deadline = performance.now() + SUBMIT_POLL_MS;
   for (;;) {
     const r = await call<SubmitOk & { error?: string }>('POST', `/api/runs/${runId}/submit`, payload, 15000);

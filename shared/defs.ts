@@ -4,11 +4,12 @@
 // 규칙 버전.
 //  v2: 시드 하나로 판 전체를 진행한다(구 랭킹 리플레이, 오프라인 플레이).
 //  v3: 60프레임마다 서버가 다음 구간 시드를 발급한다(기존 클라이언트 기본값).
-//  v4: 웹 랭킹의 대기 빈도를 줄이기 위해 180프레임마다 동기화한다.
+//  v4: 180프레임마다 구간 시드를 전환한다(이전 웹 랭킹).
+//  v5: 웹 랭킹은 발급 시드 하나로 플레이하고, 판 종료 후 입력 전체를 검증한다.
 // 게임 수치는 같지만 구간 시드 전환이 다르므로 순위표는 버전별로 분리한다.
 export const SIM_VERSION = 3;
 export const LEGACY_SIM_VERSION = 2;
-export const WEB_SIM_VERSION = 4;
+export const WEB_SIM_VERSION = 5;
 
 /**
  * 구간 길이: sim.step()을 부른 횟수, 즉 입력 프레임 수 기준이다. 60프레임은 보통 약 1초다.
@@ -20,9 +21,9 @@ const WEB_SEGMENT_FRAMES = 180;
 
 /** 버전별 규칙. 모르는 버전이면 null. segmentFrames가 0이면 구간 시드 전환이 없다. */
 export function rulesFor(version: number): { segmentFrames: number } | null {
-  if (version === LEGACY_SIM_VERSION) return { segmentFrames: 0 };
+  if (version === LEGACY_SIM_VERSION || version === WEB_SIM_VERSION) return { segmentFrames: 0 };
   if (version === SIM_VERSION) return { segmentFrames: SEGMENT_FRAMES };
-  if (version === WEB_SIM_VERSION) return { segmentFrames: WEB_SEGMENT_FRAMES };
+  if (version === 4) return { segmentFrames: WEB_SEGMENT_FRAMES };
   return null;
 }
 

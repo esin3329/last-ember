@@ -1,11 +1,11 @@
-// 랭킹(v3) 프로토콜의 서버 쪽 규칙: 브라우저 세션 쿠키, 발급 한도, 구간 시드 파생.
+// 랭킹 프로토콜의 서버 쪽 규칙: 브라우저 세션 쿠키, 발급 한도, 구간 시드 파생.
 //
-// 여기서 지키는 것은 "서버 발급 시드의 오프라인 최적화 범위를 한 구간(SEGMENT_FRAMES)으로 줄이고,
+// 여기서 지키는 것은 "서버 발급 시드의 오프라인 최적화 범위를 한 구간으로 줄이고,
 // 한 브라우저가 열 수 있는 판 수를 제한하는 것"까지다. 사람이 플레이했다는 보증은 하지 않는다.
 
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
-import { MAX_TICKS, SEGMENT_FRAMES } from '../../shared/defs.ts';
+import { MAX_TICKS } from '../../shared/defs.ts';
 
 export const SESSION_COOKIE = 'ember_sid';
 export const SESSION_COOKIE_MAX_AGE_S = 7 * 24 * 60 * 60;
@@ -13,7 +13,6 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /** 한 판이 가질 수 있는 최대 입력 프레임. 레벨업 선택 프레임 여유를 포함한다. */
 export const MAX_RUN_FRAMES = MAX_TICKS + 4096;
-export const MAX_SEGMENTS = Math.ceil(MAX_RUN_FRAMES / SEGMENT_FRAMES);
 
 export interface RankedLimits {
   /** 세션 하나가 동시에 열어 둘 수 있는 미제출 판. 넘기면 가장 오래된 판이 폐기된다. */

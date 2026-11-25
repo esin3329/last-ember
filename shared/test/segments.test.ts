@@ -10,11 +10,12 @@ import { BotRun, playBot } from './helpers.ts';
 const seedFor = (index: number): number => (Math.imul(index + 1, 0x9e3779b1) ^ 0x5bd1e995) | 0;
 const framesOf = (runs: number[]): number => runs.reduce((n, v, i) => (i % 2 === 1 ? n + v : n), 0);
 
-test('rulesFor: v2는 구간 없음, v3는 SEGMENT_FRAMES, 모르는 버전은 null', () => {
+test('rulesFor: 기존 리플레이와 180프레임 웹 랭킹의 구간 길이를 구분한다', () => {
   assert.deepEqual(rulesFor(2), { segmentFrames: 0 });
-  assert.deepEqual(rulesFor(3), { segmentFrames: SEGMENT_FRAMES });
+  assert.deepEqual(rulesFor(3), { segmentFrames: 60 });
   assert.equal(rulesFor(1), null);
-  assert.equal(rulesFor(4), null);
+  assert.deepEqual(rulesFor(4), { segmentFrames: 180 });
+  assert.equal(rulesFor(5), null);
 });
 
 test('구간 경계는 틱이 아니라 입력 프레임 기준이다(레벨업 선택 프레임은 틱을 올리지 않는다)', () => {
@@ -23,7 +24,7 @@ test('구간 경계는 틱이 아니라 입력 프레임 기준이다(레벨업 
   assert.ok(result.finished);
   // 레벨업 선택 프레임 때문에 프레임 수가 틱 수보다 크다.
   assert.ok(frames > result.ticks, `frames ${frames} ticks ${result.ticks}`);
-  // 시드는 정확히 "프레임 600개를 쓸 때마다" 한 번 필요했다.
+  // 시드는 정확히 입력 프레임 한 구간을 쓸 때마다 한 번 필요했다.
   assert.equal(segmentSeeds.length, Math.floor((frames - 1) / SEGMENT_FRAMES));
   // 경계 시점마다 프레임은 정확히 구간 길이의 배수이고, 틱은 그보다 작다(선택 프레임 수만큼).
   const bot = new BotRun(112);

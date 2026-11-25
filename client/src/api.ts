@@ -2,6 +2,8 @@
 // 모든 호출은 실패 시 null/오류 결과를 돌려주고, 호출한 쪽이 오프라인 모드로 처리한다.
 // 세션은 서버가 심는 HttpOnly 쿠키 하나다. 스크립트가 읽거나 보낼 수 있는 토큰은 없다.
 
+import { WEB_SIM_VERSION } from '../../shared/defs.ts';
+
 export interface IssuedRun {
   runId: string;
   seed: number;
@@ -64,7 +66,7 @@ async function call<T>(method: string, path: string, body?: unknown, timeoutMs =
 }
 
 export async function issueRun(): Promise<IssueOutcome> {
-  const r = await call<IssuedRun & { error?: string; retryAfterMs?: number }>('POST', '/api/runs', undefined, 2000);
+  const r = await call<IssuedRun & { error?: string; retryAfterMs?: number }>('POST', `/api/runs?version=${WEB_SIM_VERSION}`, undefined, 2000);
   if (!r) return { kind: 'offline' };
   if (r.status === 201) return { kind: 'ok', run: r.data };
   if (r.status === 429 || r.status === 503) {
@@ -74,7 +76,9 @@ export async function issueRun(): Promise<IssueOutcome> {
 }
 
 export async function fetchBoard(): Promise<BoardEntry[] | null> {
-  const r = await call<{ entries: BoardEntry[] }>('GET', '/api/leaderboard?limit=10');
+  const path = '/api/leaderboard?limit=10';
+  let r = await call<{ entries: BoardEntry[]; error?: string }>('GET', `${path}&version=${WEB_SIM_VERSION}`);
+  if (r?.status === 400 && r.data.error === 'unknown_version') r = await call('GET', path);
   return r && r.status === 200 ? r.data.entries : null;
 }
 
@@ -98,12 +102,14 @@ export async function commitSegment(
   runs: number[],
   final: boolean,
   deadlineMs = SEGMENT_DEADLINE_MS,
+  metrics?: { attempts: number },
 ): Promise<SegmentResult> {
   const deadline = performance.now() + deadlineMs;
   let lastError = 'network';
   for (;;) {
     const remaining = deadline - performance.now();
     if (remaining <= 0) return { ok: false, error: lastError };
+    if (metrics) metrics.attempts++;
     const r = await call<{ final?: boolean; next?: { index: number; seed: number } | null; error?: string; retryAfterMs?: number }>(
       'POST',
       `/api/runs/${runId}/segments/${index}`,

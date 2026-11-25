@@ -50,8 +50,8 @@ export interface Played {
  * 발급 → 구간 플레이 → 구간 확정을 마지막 구간까지 반복한다. 구간마다 실제 플레이 시간만큼 시계를 돌린다.
  * stopAfter를 주면 그 수만큼 구간을 확정하고 멈춘다(최종 구간을 보내지 않음).
  */
-export async function playRanked(browser: Browser, clock: Clock, stopAfter = Infinity): Promise<Played> {
-  const issued = await browser.api('POST', '/api/runs');
+export async function playRanked(browser: Browser, clock: Clock, stopAfter = Infinity, version?: number): Promise<Played> {
+  const issued = await browser.api('POST', version === undefined ? '/api/runs' : `/api/runs?version=${version}`);
   assert.equal(issued.status, 201, JSON.stringify(issued.json));
   const runId = issued.json.runId as string;
   const bot = new BotRun(issued.json.seed, issued.json.segmentFrames);

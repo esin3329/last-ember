@@ -16,12 +16,11 @@ import { NO_TRUSTED_PROXY, type TrustProxyConfig, isTrustedPeer, resolveClientIp
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { isIP } from 'node:net';
 import type { TLSSocket } from 'node:tls';
-import { SEGMENT_FRAMES, SIM_VERSION, TICK_RATE, rulesFor } from '../../shared/defs.ts';
+import { SIM_VERSION, TICK_RATE, WEB_SIM_VERSION, rulesFor } from '../../shared/defs.ts';
 import { countTicks } from '../../shared/input.ts';
 import type { AppLogEvent } from './logging.ts';
 import {
   MAX_RUN_FRAMES,
-  MAX_SEGMENTS,
   RANKED_LIMITS,
   RUN_RETENTION_MS,
   SESSION_RETENTION_MS,
@@ -208,6 +207,8 @@ export function createApp(deps: AppDeps): Server {
 
     if (method === 'POST' && path === '/api/runs') {
       requireSameSite(req);
+      const version = Number(url.searchParams.get('version') ?? SIM_VERSION);
+      if (version !== SIM_VERSION && version !== WEB_SIM_VERSION) throw new HttpError(400, 'unknown_version');
       if (!issueLimit.take(ip, now())) throw new HttpError(429, 'rate_limited');
       const known = existingSession(req);
       const token = known ? readSessionToken(req)! : newSessionToken();
@@ -218,7 +219,7 @@ export function createApp(deps: AppDeps): Server {
         runId,
         seed,
         secret,
-        simVersion: SIM_VERSION,
+        simVersion: version,
         sessionHash: known ?? hashSessionToken(token),
         ip,
         now: now(),
@@ -232,7 +233,7 @@ export function createApp(deps: AppDeps): Server {
       return send(
         res,
         201,
-        { runId, seed, simVersion: SIM_VERSION, segmentFrames: SEGMENT_FRAMES },
+        { runId, seed, simVersion: version, segmentFrames: rulesFor(version)!.segmentFrames },
         { 'Set-Cookie': sessionCookie(token, isSecure(req)) },
       );
     }
@@ -240,7 +241,7 @@ export function createApp(deps: AppDeps): Server {
     if (method === 'GET' && path === '/api/leaderboard') {
       if (!readLimit.take(ip, now())) throw new HttpError(429, 'rate_limited');
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
-      // 지난 규칙(v2)의 기록도 version=2로 조회할 수 있다.
+      // 이전 버전의 기록도 version 쿼리로 조회할 수 있다.
       const version = Number(url.searchParams.get('version') ?? SIM_VERSION);
       if (!rulesFor(version)) throw new HttpError(400, 'unknown_version');
       const rows = store.leaderboard(version, limit).map((r, i) => ({
@@ -316,13 +317,14 @@ export function createApp(deps: AppDeps): Server {
   }
 
   function commitSegment(run: RunRow, index: number, body: Record<string, unknown>, res: ServerResponse): void {
+    const segmentFrames = rulesFor(run.sim_version)?.segmentFrames;
+    if (!segmentFrames) throw new HttpError(409, 'version_mismatch');
     // 1) 형식: 비싼 일을 하기 전에 싸게 걸러낼 수 있는 것부터.
-    const frames = countTicks(body?.inputs, SEGMENT_FRAMES);
+    const frames = countTicks(body?.inputs, segmentFrames);
     const final = body?.final === true;
-    if (frames < 1 || (body?.final !== undefined && typeof body.final !== 'boolean') || (!final && frames !== SEGMENT_FRAMES)) {
+    if (frames < 1 || (body?.final !== undefined && typeof body.final !== 'boolean') || (!final && frames !== segmentFrames)) {
       throw new HttpError(400, 'invalid_payload');
     }
-    if (run.sim_version !== SIM_VERSION) throw new HttpError(409, 'version_mismatch');
     const closed = closedRunError(run);
     if (closed) throw closed;
 
@@ -351,7 +353,7 @@ export function createApp(deps: AppDeps): Server {
       log({ event: 'run_rejected', runId: run.id, reason: 'timeout' });
       throw new HttpError(422, 'timeout');
     }
-    if (run.frames + frames > MAX_RUN_FRAMES || (!final && index + 1 >= MAX_SEGMENTS)) {
+    if (run.frames + frames > MAX_RUN_FRAMES || (!final && index + 1 >= Math.ceil(MAX_RUN_FRAMES / segmentFrames))) {
       store.markRejected(run.id, 'too_long', current);
       log({ event: 'run_rejected', runId: run.id, reason: 'too_long' });
       throw new HttpError(422, 'too_long');
@@ -377,7 +379,8 @@ export function createApp(deps: AppDeps): Server {
     if (!Number.isInteger(claimedScore) || !Number.isInteger(claimedSum)) {
       throw new HttpError(400, 'invalid_payload');
     }
-    if (run.sim_version !== SIM_VERSION) throw new HttpError(409, 'version_mismatch');
+    const segmentFrames = rulesFor(run.sim_version)?.segmentFrames;
+    if (!segmentFrames) throw new HttpError(409, 'version_mismatch');
     // 같은 점수·체크섬의 재전송은 응답이 유실된 성공 제출로 보고 같은 결과를 다시 돌려준다.
     if (run.status === 'verified' && run.score === claimedScore && run.checksum === claimedSum) {
       return send(res, 200, {
@@ -386,7 +389,7 @@ export function createApp(deps: AppDeps): Server {
         score: run.score,
         kills: run.kills,
         won: run.won === 1,
-        rank: store.rankOf(SIM_VERSION, run.score!),
+        rank: store.rankOf(run.sim_version, run.score!),
       });
     }
     const closed = closedRunError(run);
@@ -423,7 +426,7 @@ export function createApp(deps: AppDeps): Server {
     const segmentSeeds = segments.slice(1).map((_, i) => segmentSeed(run.secret!, i + 1));
     let result;
     try {
-      result = await verify(run.seed, runs, { segmentFrames: rulesFor(run.sim_version)!.segmentFrames, segmentSeeds });
+      result = await verify(run.seed, runs, { segmentFrames, segmentSeeds });
     } catch (err) {
       if (err instanceof QueueFullError) {
         store.releaseClaim(id);
@@ -464,7 +467,7 @@ export function createApp(deps: AppDeps): Server {
       score: result.score,
       kills: result.kills,
       won: result.won,
-      rank: store.rankOf(SIM_VERSION, result.score),
+      rank: store.rankOf(run.sim_version, result.score),
     });
   }
 

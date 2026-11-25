@@ -71,6 +71,24 @@ test('정상 플레이는 구간별로 확정되고 서버 저장본으로 검�
   assert.deepEqual(again, resultOf(played.bot.sim));
 });
 
+test('웹 랭킹은 180프레임 구간을 검증하고 기존 랭킹과 순위표를 분리한다', async () => {
+  const b = browser();
+  const played = await playRanked(b, clockCtl, Infinity, 4);
+  assert.equal(played.bot.sim.segmentFrames, 180);
+  const submit = await b.api('POST', `/api/runs/${played.runId}/submit`, submitBody(played));
+  assert.equal(submit.status, 200);
+  assert.equal(submit.json.rank, 1);
+  const board = await b.api('GET', '/api/leaderboard?version=4');
+  assert.equal(board.json.entries[0].runId, played.runId);
+  const legacy = await b.api('GET', '/api/leaderboard');
+  assert.ok(!legacy.json.entries.some((entry: { runId: string }) => entry.runId === played.runId));
+  const replay = await b.api('GET', `/api/runs/${played.runId}/replay`);
+  assert.equal(replay.json.simVersion, 4);
+  assert.deepEqual(simulate(replay.json.seed, replay.json.inputs, {
+    segmentFrames: 180, segmentSeeds: replay.json.segmentSeeds,
+  }), played.result);
+});
+
 test('발급 응답은 0번 구간 시드만 공개하고, 비밀 값은 담지 않는다', async () => {
   const issued = await browser().api('POST', '/api/runs');
   assert.equal(issued.status, 201);

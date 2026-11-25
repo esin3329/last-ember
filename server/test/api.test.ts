@@ -89,6 +89,44 @@ test('웹 랭킹은 180프레임 구간을 검증하고 기존 랭킹과 순위�
   }), played.result);
 });
 
+test('v5는 중간 요청 없이 판 전체를 검증하고 90초 유휴 만료를 적용하지 않는다', async () => {
+  const b = browser();
+  const issued = await b.api('POST', '/api/runs?version=5');
+  assert.equal(issued.status, 201);
+  assert.equal(issued.json.segmentFrames, 0);
+  const id = issued.json.runId;
+  const played = playBot(issued.json.seed);
+  const boardPath = '/api/leaderboard?version=5';
+  const path = `/api/runs/${id}/submit`;
+  clock += Math.max(91_000, Math.ceil(played.result.ticks * 1000 / 60));
+  store.expireOpen(clock);
+  const middle = await b.api('POST', `/api/runs/${id}/segments/0`, { inputs: [4, 60], final: false });
+  assert.equal(middle.status, 409);
+  assert.equal(middle.json.error, 'version_mismatch');
+  assert.deepEqual((await b.api('GET', boardPath)).json.entries, []);
+  assert.deepEqual(store.getSegments(id), []);
+  const payload = { ...submitBody(played), inputs: played.runs };
+  const accepted = await b.api('POST', path, payload);
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.json));
+  assert.deepEqual((await b.api('POST', path, payload)).json, accepted.json);
+  assert.equal((await b.api('GET', boardPath)).json.entries[0].runId, id);
+  const replay = await b.api('GET', `/api/runs/${id}/replay`);
+  assert.equal(replay.json.simVersion, 5);
+  assert.deepEqual(simulate(replay.json.seed, replay.json.inputs), played.result);
+});
+
+test('v5는 종료에 이르지 않은 입력을 순위표에 올리지 않는다', async () => {
+  const b = browser();
+  const issued = await b.api('POST', '/api/runs?version=5');
+  assert.equal(issued.status, 201);
+  const id = issued.json.runId;
+  clock += 1000;
+  const response = await b.api('POST', `/api/runs/${id}/submit`, { inputs: [4, 60], name: 'quit', score: 0, checksum: 0 });
+  assert.equal(response.status, 422);
+  assert.equal(response.json.error, 'unfinished');
+  assert.equal((await b.api('GET', `/api/runs/${id}/replay`)).status, 404);
+});
+
 test('발급 응답은 0번 구간 시드만 공개하고, 비밀 값은 담지 않는다', async () => {
   const issued = await browser().api('POST', '/api/runs');
   assert.equal(issued.status, 201);

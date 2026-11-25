@@ -5,7 +5,7 @@
 // 그래서 기록한 입력만 다시 넣으면 어디서든 같은 판이 재현된다.
 
 import { botInput } from '../../shared/bot.ts';
-import { DT, Kind, UPGRADE_META, rulesFor } from '../../shared/defs.ts';
+import { DT, Kind, UPGRADE_META, WEB_SIM_VERSION, rulesFor } from '../../shared/defs.ts';
 import { type InputFrame, InputRecorder, decodeFrame, encodeFrame, expandRuns } from '../../shared/input.ts';
 import { type SimEvent, type SimState, beginSegment, createSim, resultOf, segmentDue, step } from '../../shared/sim.ts';
 import * as api from './api.ts';
@@ -49,18 +49,10 @@ let replayCodes: Uint8Array = new Uint8Array(0);
 let replayIdx = 0;
 let replaySpeed = 1;
 let replayLabel = '';
-let lastRun: { seed: number; runs: number[]; segmentFrames: number; segmentSeeds: number[] } | null = null;
+let lastRun: { seed: number; runs: number[] } | null = null;
 let replaySeeds: number[] = [];
 let replaySeedIdx = 0;
 
-// 랭킹 구간 동기화 상태
-let playSegmentFrames = 0; // 0이면 구간 없음(오프라인, v2 규칙)
-let segIndex = 0; // 서버에 확정할 현재 구간 번호
-let segRecorder = new InputRecorder(); // 현재 구간의 입력(서버로 보내는 단위)
-let segmentSeeds: number[] = []; // 이번 판에서 쓴 구간 시드(1번 구간부터). 방금 플레이 리플레이용
-let syncing = false; // 서버 확정을 기다리는 동안 시뮬레이션을 멈춘다(사용자 일시정지 paused와 별개)
-let syncNoticeTimer = 0;
-let syncMetrics = { attempts: 0, waitMs: 0 };
 let playEpoch = 0;
 let boardRequest = 0;
 
@@ -105,9 +97,6 @@ function resetWorld(newSim: SimState): void {
   ui.dom.retry.disabled = false;
   ui.dom.startStatus.classList.add('hidden');
   ui.dom.startStatus.textContent = '';
-  syncing = false;
-  syncMetrics = { attempts: 0, waitMs: 0 };
-  window.clearTimeout(syncNoticeTimer);
   submission.discard();
   ui.setResubmit('hidden');
   fx.clear();
@@ -201,17 +190,13 @@ async function startGame(): Promise<void> {
   const issued = await api.issueRun();
   if (epoch !== playEpoch) return;
   const offered = issued.kind === 'ok' ? issued.run : null;
-  const run = offered && offered.segmentFrames > 0 && rulesFor(offered.simVersion)?.segmentFrames === offered.segmentFrames ? offered : null;
+  const run = offered?.simVersion === WEB_SIM_VERSION && offered.segmentFrames === 0 ? offered : null;
   runId = run ? run.runId : null;
   seed = run ? run.seed : randomSeed();
-  playSegmentFrames = run ? run.segmentFrames : 0;
   ui.dom.runMode.textContent = run ? '랭킹 도전' : '오프라인 · 랭킹 미기록';
   recorder = new InputRecorder();
-  segRecorder = new InputRecorder();
-  segmentSeeds = [];
-  segIndex = 0;
   setMode('play');
-  resetWorld(createSim(seed, true, playSegmentFrames));
+  resetWorld(createSim(seed));
   ui.showMenu(false);
   ui.showHud(true);
   // 처음 몇 초 동안만 조작 안내를 띄운다
@@ -273,12 +258,6 @@ async function refreshBoard(): Promise<void> {
 
 /** 한 틱 진행. 입력을 기다려야 해서 진행할 수 없으면 false. */
 function stepOnce(): boolean {
-  if (syncing) return false;
-  // 구간 경계: 서버가 이전 구간 입력을 확정해 주기 전에는 한 프레임도 진행하지 않는다.
-  if (mode === 'play' && segmentDue(sim)) {
-    void syncSegment();
-    return false;
-  }
   if (mode === 'play' && AUTOPLAY) {
     botInput(sim, frame);
     recordFrame();
@@ -325,52 +304,12 @@ function stepOnce(): boolean {
   return true;
 }
 
-/** 한 입력 프레임을 판 전체 기록과 현재 구간 기록에 남긴다. */
+/** 한 입력 프레임을 종료 후 검증 및 내 리플레이용으로 기록한다. */
 function recordFrame(): void {
-  const code = encodeFrame(frame);
-  recorder.push(code);
-  segRecorder.push(code);
-}
-
-/**
- * 구간 경계 처리: 서버 판이면 이번 구간 입력을 확정하고 다음 시드를 받는다(그동안 시뮬레이션은 멈춘다).
- * 서버에 닿지 않거나 기한을 넘기면 로컬 시드로 이어가며, 그 판은 기록되지 않는다.
- */
-async function syncSegment(): Promise<void> {
-  if (syncing) return;
-  syncing = true;
-  const epoch = playEpoch;
-  let nextSeed = randomSeed();
-  const id = runId;
-  if (id) {
-    // 왕복이 짧으면 안내를 띄우지 않는다.
-    syncNoticeTimer = window.setTimeout(() => ui.setBanner('서버와 동기화 중…'), 500);
-    const startedAt = performance.now();
-    syncMetrics.attempts = 0;
-    const res = await api.commitSegment(id, segIndex, segRecorder.runs, false, undefined, syncMetrics);
-    if (epoch !== playEpoch) return; // 그 사이 다른 화면으로 넘어갔다
-    syncMetrics.waitMs = performance.now() - startedAt;
-    window.clearTimeout(syncNoticeTimer);
-    ui.setBanner(null);
-    if (res.ok && res.next) {
-      nextSeed = res.next.seed;
-      segIndex = res.next.index;
-    } else {
-      runId = null;
-      ui.dom.runMode.textContent = '랭킹 연결 끊김 · 미기록';
-      const reason = res.ok ? '서버 응답이 올바르지 않습니다' : (SYNC_ERRORS[res.error] ?? res.error);
-      ui.toast(`${reason} — 로컬로 이어가며 이번 판은 기록되지 않습니다`);
-    }
-  }
-  beginSegment(sim, nextSeed);
-  segmentSeeds.push(nextSeed | 0);
-  segRecorder = new InputRecorder();
-  syncing = false;
-  acc = 0;
+  recorder.push(encodeFrame(frame));
 }
 
 function advance(dt: number): void {
-  if (syncing) return;
   if (hitstop > 0) {
     hitstop -= dt;
     return;
@@ -568,7 +507,7 @@ function onFinish(): void {
     return;
   }
 
-  lastRun = { seed, runs: recorder.runs, segmentFrames: playSegmentFrames, segmentSeeds: [...segmentSeeds] };
+  lastRun = { seed, runs: recorder.runs };
   ui.showResult({
     title: r.won ? '심연의 핵 파괴!' : '불씨가 꺼졌다',
     tone: r.won ? 'win' : 'lose',
@@ -584,14 +523,12 @@ function onFinish(): void {
     ui.setStatus('이 판은 랭킹에 등록되지 않습니다. 최고 점수는 이 브라우저에 저장됩니다.', '');
     return;
   }
-  // 결과·이름·체크섬과 마지막 구간 입력을 지금 값으로 고정한다. 재시도해도 같은 값으로만 제출된다.
+  // 결과와 전체 입력을 고정한다. 재시도도 같은 페이로드로 제출한다.
   const id = runId;
   runId = null;
-  const finalSegment = { index: segIndex, runs: segRecorder.runs };
-  const payload = { name: playerName(), score: r.score, checksum: r.checksum };
-  const finalState: api.FinalSubmitState = { finalCommitted: false }; // 재시도 사이에 최종 구간 ACK를 기억한다
+  const payload = { name: playerName(), score: r.score, checksum: r.checksum, inputs: recorder.runs };
   submission.start(async () => {
-    const verified = await api.submitRun(id, finalSegment, payload, finalState);
+    const verified = await api.submitRun(id, payload);
     // 결과 화면을 이미 떠났더라도 검증된 기록으로 리더보드를 갱신한다.
     if (verified.ok) void refreshBoard();
     return verified;
@@ -634,14 +571,6 @@ const ISSUE_ERRORS: Record<string, string> = {
   quota_exceeded: '30분 발급 한도에 도달했습니다',
   ip_quota_exceeded: '이 네트워크의 발급 한도에 도달했습니다',
   server_busy: '서버가 바쁩니다',
-};
-
-/** 구간 동기화가 끊겨 로컬로 이어갈 때의 이유. */
-const SYNC_ERRORS: Record<string, string> = {
-  network: '서버에 연결할 수 없습니다',
-  timeout: '일시정지나 지연이 길어 서버 기한을 넘겼습니다',
-  expired: '발급 기한이 지났습니다',
-  abandoned: '새 판 발급으로 이 판이 무효화되었습니다',
 };
 
 // ───────────────────────── 입력 바인딩 ─────────────────────────
@@ -715,7 +644,7 @@ ui.dom.name.addEventListener('keydown', (e) => {
 });
 ui.dom.retry.addEventListener('click', () => void startGame());
 ui.dom.watch.addEventListener('click', () => {
-  if (lastRun) startReplay(lastRun.seed, lastRun.runs, '방금 플레이', lastRun.segmentFrames, lastRun.segmentSeeds);
+  if (lastRun) startReplay(lastRun.seed, lastRun.runs, '방금 플레이', 0, []);
 });
 ui.dom.toMenu.addEventListener('click', returnToMenu);
 ui.dom.replayExit.addEventListener('click', returnToMenu);
@@ -751,7 +680,7 @@ function loop(now: number): void {
   if (!paused) fx.update(dt);
   sfx.setMusic(mode !== 'menu' && !paused && !finished && sim.phase === 'playing');
 
-  const waiting = finished || paused || syncing || sim.phase === 'levelup';
+  const waiting = finished || paused || sim.phase === 'levelup';
   renderer.draw(sim, fx, {
     alpha: waiting ? 1 : Math.min(1, acc / DT),
     time: now / 1000,
@@ -776,7 +705,6 @@ function loop(now: number): void {
             `enemies ${sim.enemies.length} (drawn ${renderer.drawn})\n` +
             `bullets ${sim.bullets.length}  gems ${sim.gems.length}\n` +
             `particles ${fx.particles.length}\n` +
-            `rank sync ${playSegmentFrames}f · ${syncing ? '대기 중' : `${syncMetrics.waitMs.toFixed(0)}ms`} · 재시도 ${Math.max(0, syncMetrics.attempts - 1)}회\n` +
             `replay ${recorder.runs.length / 2} runs / ${recorder.total} ticks`
         : null,
     );

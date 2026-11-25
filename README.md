@@ -57,7 +57,12 @@ cloudflared tunnel --url http://127.0.0.1:8787
 
 콘솔에 표시된 `https://…trycloudflare.com` 주소에서 `/api/health`가 `ok: true`인지 확인합니다. 이어서 휴대폰의 Wi-Fi를 끄고 **같은 HTTPS 주소**에서 한 판을 시작해, 결과 화면에 **검증 완료**가 뜨고 리더보드에서 리플레이가 열리는지 확인하세요. Quick Tunnel은 [테스트 전용](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)이고 링크를 받은 사람은 누구나 접속할 수 있습니다. 터널을 다시 실행하면 주소가 바뀔 수 있으므로 이 주소로 PWA를 배포하거나 설치를 안내하지 않습니다. 종료할 때는 터널을 먼저, 서버를 나중에 `Ctrl+C`로 내립니다.
 
-**Cloudflare Pages와 연결할 때** — 위 임시 링크는 VM 서버를 단독 검증하기 위한 것입니다. 기존 Pages 주소에서 랭킹을 쓰려면 브라우저의 같은 출처 `/api/*` 요청만 Pages에서 받아 VM 터널로 전달하는 구성이 별도로 필요합니다. 현재 Pages 배포본에는 이 연결이 없습니다. SQLite와 점수 검증은 VM에 남깁니다.
+**Cloudflare Pages 랭킹 연결** — 프론트와 PWA는 기존 Pages 프로젝트(`last-ember`)에서 제공하고, Pages Function은 같은 출처의 `/api/*`만 Tailscale Funnel의 HTTPS 원본으로 전달합니다. SQLite와 점수 검증은 VM에 남습니다. Funnel 원본 주소는 [`wrangler.jsonc`](wrangler.jsonc)의 `PAGES_API_ORIGIN`을 사용합니다. 기존 서비스의 공개 포트는 바꾸지 않습니다.
+
+1. VM 안에서 새 버전의 Node 서버를 실행합니다. `HOST=127.0.0.1`, `TRUST_PROXY=1`, `TRUST_PROXY_CIDRS=127.0.0.1/32`를 사용하고, 배포 설정에 임의의 32바이트 이상 비밀값을 `PAGES_PROXY_TOKEN`으로 지정합니다. Tailscale이 Node와 같은 VM에서 `http://127.0.0.1:8787`을 가리켜야 합니다. VM은 Pages 연결에 `dist/`가 필요하지 않습니다.
+2. Cloudflare 대시보드에서 **기존 프로젝트의 프로덕션 시크릿** `PAGES_PROXY_TOKEN`에 같은 값을 등록합니다. 비밀값은 저장소나 `wrangler.jsonc`에 넣지 않습니다. 이 값은 방문자 IP를 전달한 요청이 Pages에서 왔음을 VM이 확인하는 데 사용합니다.
+3. 저장소 루트에서 `npm ci && npm run build` 후, 인증된 Wrangler로 `npx wrangler pages deploy dist --project-name last-ember --branch main`을 실행합니다. `functions/`는 대시보드의 ZIP 업로드로 배포할 수 없습니다. 기존 프로덕션 브랜치 설정이 `main`인지 먼저 확인하세요.
+4. `https://last-ember-bib.pages.dev/api/health`가 `{"ok":true,...}` JSON을 반환하는지 확인합니다. 외부 기기의 Pages 주소에서 한 판을 마치고 점수 등록과 리플레이를 확인합니다. API 경로를 캐시하지 마세요.
 
 **백업:** 서버가 켜져 있어도 아래 명령으로 일관된 사본을 만들 수 있습니다. 완성된 백업을 VM 밖에도 복사하세요. 복원과 종료 절차는 [백업과 로그](#백업과-로그)를 참고하세요.
 

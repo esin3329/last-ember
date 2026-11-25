@@ -11,9 +11,10 @@
 //   5. GET  /api/leaderboard                검증된 기록만 노출
 //   6. GET  /api/runs/:id/replay            검증된 판의 시드(+v3면 구간 시드)와 입력
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { NO_TRUSTED_PROXY, type TrustProxyConfig, isTrustedPeer, resolveClientIp } from './trustedProxy.ts';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
+import { isIP } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 import { SEGMENT_FRAMES, SIM_VERSION, TICK_RATE, rulesFor } from '../../shared/defs.ts';
 import { countTicks } from '../../shared/input.ts';
@@ -42,6 +43,7 @@ export interface AppDeps {
   verify: VerifyFn;
   now?: () => number;
   trustProxy?: TrustProxyConfig;
+  pagesProxyToken?: string;
   staticDir?: string;
   log?: (event: AppLogEvent) => void;
   healthy?: () => boolean;
@@ -131,6 +133,7 @@ export function createApp(deps: AppDeps): Server {
   const log = deps.log ?? (() => {});
   const limits = deps.limits ?? RANKED_LIMITS;
   const trustProxy = deps.trustProxy ?? NO_TRUSTED_PROXY;
+  const pagesProxyToken = deps.pagesProxyToken ? Buffer.from(deps.pagesProxyToken) : null;
   const issueLimit = new RateLimiter(20, 20);
   const submitLimit = new RateLimiter(10, 10);
   const readLimit = new RateLimiter(120, 120);
@@ -176,13 +179,26 @@ export function createApp(deps: AppDeps): Server {
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
-    const ip = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustProxy);
+    let ip = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustProxy);
     const method = req.method ?? 'GET';
 
     if (!path.startsWith('/api/')) {
       if (method !== 'GET' && method !== 'HEAD') throw new HttpError(405, 'method_not_allowed');
       if (deps.staticDir && (await serveStatic(deps.staticDir, path, res))) return;
       throw new HttpError(404, 'not_found');
+    }
+
+    // Funnel sees the Pages edge rather than the visitor. Only a request authenticated
+    // as our Pages Function may replace the address used by the ranking limits.
+    const proxyToken = req.headers['x-ember-proxy-token'];
+    if (proxyToken !== undefined) {
+      const visitorIp = req.headers['x-ember-client-ip'];
+      const token = typeof proxyToken === 'string' ? Buffer.from(proxyToken) : null;
+      if (!pagesProxyToken || !token || token.length !== pagesProxyToken.length ||
+          !timingSafeEqual(token, pagesProxyToken) || typeof visitorIp !== 'string' || !isIP(visitorIp)) {
+        throw new HttpError(403, 'invalid_pages_proxy');
+      }
+      ip = resolveClientIp(visitorIp, undefined, NO_TRUSTED_PROXY);
     }
 
     if (method === 'GET' && path === '/api/health') {

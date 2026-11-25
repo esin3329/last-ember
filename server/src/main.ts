@@ -42,6 +42,7 @@ const server = createApp({
   verify: pool.verify,
   staticDir: servingClient ? distDir : undefined,
   trustProxy,
+  pagesProxyToken: process.env.PAGES_PROXY_TOKEN,
   healthy: () => !closing && !pool.isClosed,
   log: (event) => writeLog(event, event.event === 'request_error' ? 'error' : 'info'),
 });

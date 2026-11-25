@@ -1,0 +1,8 @@
+{
+  "name": "last-ember",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2024-09-02",
+  "vars": {
+    "PAGES_API_ORIGIN": "https://minipc.tail589e24.ts.net:10000"
+  }
+}

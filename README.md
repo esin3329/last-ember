@@ -7,7 +7,7 @@
 - 서버: Node.js 24 기본 모듈만 사용 (`node:http`, `node:sqlite`, `node:worker_threads`)
 - 플레이어·적 6종·전장 배경·강화 아이콘 14종은 PNG, 점화·돌진 경고음은 WAV, 반복 배경음은 MP3를 사용하고, 나머지 전투 그래픽과 효과음은 코드로 생성
 
-**[바로 플레이](https://esin3329.github.io/last-ember/)** · **[Cloudflare 미러](https://last-ember-bib.pages.dev/)** — 두 주소는 랭킹 서버 없는 정적 배포입니다. 랭킹을 테스트하려면 [Windows 미니 PC에서 호스팅](#windows-미니-pc에서-랭킹-호스팅)하세요.
+**[바로 플레이](https://esin3329.github.io/last-ember/)** · **[Cloudflare 미러](https://last-ember-bib.pages.dev/)** — 두 주소는 랭킹 서버 없는 정적 배포입니다. 랭킹을 테스트하려면 [Linux VM에서 호스팅](#linux-vm에서-랭킹-호스팅)하세요.
 
 홈 화면에 설치해 오프라인으로도 즐길 수 있습니다([설치·오프라인 조건](#홈-화면에-설치pwa와-오프라인-플레이)).
 
@@ -33,41 +33,37 @@ npm run dev
 | `npm run verify:csharp` | C# 코어가 TypeScript와 같은 결과를 내는지 대조 (.NET SDK 필요) |
 | `npm run backup` | 실행 중인 SQLite DB의 일관된 백업 생성 |
 
-### Windows 미니 PC에서 랭킹 호스팅
+### Linux VM에서 랭킹 호스팅
 
-Windows 호스트에서 Node 서버 한 개가 게임 파일과 `/api`를 같은 주소로 제공합니다. VPS·Firebase나 공유기 포트 포워딩은 필요 없습니다. 아래 명령은 미니 PC의 저장소 루트에서 PowerShell로 실행합니다.
+미니 PC의 Linux VM(Ubuntu 등) 안에서 Node 서버와 `cloudflared`를 함께 실행합니다. Node 서버 한 개가 게임 파일과 `/api`를 같은 주소로 제공합니다. VM에는 인터넷으로 나가는 연결만 필요하므로 보통 NAT 네트워크로 충분합니다. VM이나 공유기에서 포트 포워딩을 설정하지 않습니다. 아래 명령은 VM에 로그인한 뒤 저장소 루트에서 Bash로 실행합니다.
 
 **1. 빌드하고 로컬 서버 시작** — Node.js 24와 [cloudflared](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)를 준비하세요. `npm ci`와 `npm run build`는 첫 실행 및 코드 업데이트 때 수행합니다.
 
-```powershell
-npm ci
-npm run build
-# 위 두 명령이 성공한 뒤 실행합니다.
-$env:HOST = '127.0.0.1'
-$env:PORT = '8787'
-$env:DB_PATH = Join-Path $env:LOCALAPPDATA 'LastEmber\runs.db'
-$env:TRUST_PROXY = '1'
-$env:TRUST_PROXY_CIDRS = '127.0.0.1/32'
-npm start
+```bash
+npm ci && npm run build &&
+  HOST=127.0.0.1 PORT=8787 \
+  DB_PATH="$HOME/.local/share/last-ember/runs.db" \
+  TRUST_PROXY=1 TRUST_PROXY_CIDRS=127.0.0.1/32 \
+  npm start
 ```
 
-`server_started` 로그의 `host`는 `127.0.0.1`, `servingClient`는 `true`여야 합니다. 다른 PowerShell에서 `Invoke-RestMethod http://127.0.0.1:8787/api/health`를 실행해 `ok: true`를 확인하세요. 이 설정은 같은 PC의 `cloudflared`만 앞단 프록시로 사용하는 경우입니다. 서버 포트를 LAN이나 인터넷에 열지 말고, DB는 동기화 폴더가 아닌 로컬 디스크에 두세요.
+`server_started` 로그의 `host`는 `127.0.0.1`, `servingClient`는 `true`여야 합니다. **같은 VM**의 다른 셸에서 `curl -fsS http://127.0.0.1:8787/api/health`를 실행해 `"ok":true`를 확인하세요. 이 설정은 VM 내부에서 `cloudflared`가 Node에 직접 연결할 때만 사용합니다. SQLite는 Windows 공유 폴더나 네트워크 드라이브가 아닌 **VM 내부의 영구 가상 디스크**에 두세요.
 
-**2. 임시 링크로 외부 테스트** — 서버를 켜 둔 채 다른 PowerShell에서 실행합니다.
+**2. 임시 링크로 외부 테스트** — Node 서버를 켜 둔 채 같은 VM의 다른 셸에서 실행합니다.
 
-```powershell
+```bash
 cloudflared tunnel --url http://127.0.0.1:8787
 ```
 
 콘솔에 표시된 `https://…trycloudflare.com` 주소에서 `/api/health`가 `ok: true`인지 확인합니다. 이어서 휴대폰의 Wi-Fi를 끄고 **같은 HTTPS 주소**에서 한 판을 시작해, 결과 화면에 **검증 완료**가 뜨고 리더보드에서 리플레이가 열리는지 확인하세요. Quick Tunnel은 [테스트 전용](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)이고 링크를 받은 사람은 누구나 접속할 수 있습니다. 터널을 다시 실행하면 주소가 바뀔 수 있으므로 이 주소로 PWA를 배포하거나 설치를 안내하지 않습니다. 종료할 때는 터널을 먼저, 서버를 나중에 `Ctrl+C`로 내립니다.
 
-**3. 계속 운영할 때** — Cloudflare에서 관리하는 도메인이 있다면 [고정 연결을 만들고](https://developers.cloudflare.com/tunnel/get-started/) `play.내도메인`을 `http://127.0.0.1:8787`에 연결하세요. `/api/*`는 CDN 캐시 규칙에서 제외합니다. 미니 PC 절전을 끄고, 재부팅 후 Node 서버와 터널이 자동 시작하도록 구성한 다음 위의 외부 테스트를 다시 하세요. 같은 DB로 `npm start`를 두 번 띄우지 마세요. 서버가 꺼지거나 주소 연결이 끊겨도 기존 GitHub·Cloudflare 정적판은 별도로 플레이할 수 있습니다.
+**Cloudflare Pages와 연결할 때** — 위 임시 링크는 VM 서버를 단독 검증하기 위한 것입니다. 기존 Pages 주소에서 랭킹을 쓰려면 브라우저의 같은 출처 `/api/*` 요청만 Pages에서 받아 VM 터널로 전달하는 구성이 별도로 필요합니다. 현재 Pages 배포본에는 이 연결이 없습니다. SQLite와 점수 검증은 VM에 남깁니다.
 
-**백업:** 서버가 켜져 있어도 아래 명령으로 일관된 사본을 만들 수 있습니다. 완성된 백업을 미니 PC 밖에도 보관하세요. 복원과 종료 절차는 [백업과 로그](#백업과-로그)를 참고하세요.
+**백업:** 서버가 켜져 있어도 아래 명령으로 일관된 사본을 만들 수 있습니다. 완성된 백업을 VM 밖에도 복사하세요. 복원과 종료 절차는 [백업과 로그](#백업과-로그)를 참고하세요.
 
-```powershell
-$dataDir = Join-Path $env:LOCALAPPDATA 'LastEmber'
-npm run backup -- --db (Join-Path $dataDir 'runs.db') --out (Join-Path $dataDir 'backups')
+```bash
+data_dir="$HOME/.local/share/last-ember"
+npm run backup -- --db "$data_dir/runs.db" --out "$data_dir/backups/"
 ```
 
 ### Unity Android판
@@ -95,7 +91,7 @@ npm run backup -- --db (Join-Path $dataDir 'runs.db') --out (Join-Path $dataDir 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `PORT` | `8787` | HTTP 포트 |
-| `HOST` | 미설정(Node 기본 바인딩) | HTTP 수신 주소. 같은 PC에서 터널을 연결할 때는 `127.0.0.1` |
+| `HOST` | 미설정(Node 기본 바인딩) | HTTP 수신 주소. Node와 터널이 같은 VM 또는 호스트에서 실행되면 `127.0.0.1` |
 | `DB_PATH` | `data/runs.db` | SQLite 파일 경로 (`:memory:`로 메모리 DB 사용) |
 | `VERIFY_WORKERS` | 자동 (`1`–`4`) | 검증 워커 수 (명시 시 `1`–`32` 정수, 범위 밖·비정수는 시작 실패) |
 | `TRUST_PROXY` | `0` | 신뢰할 프록시 홉 수 (`0`–`32` 정수, 범위 밖·비숫자는 시작 실패). `0`은 `X-Forwarded-For`를 무시합니다. 소켓 피어를 첫 홉으로 세므로 `1`은 XFF 오른쪽 첫 주소, `2`는 오른쪽 두 번째 주소를 사용합니다. |

@@ -30,8 +30,9 @@ export class Keyboard {
 
   constructor() {
     window.addEventListener('keydown', (e) => {
-      // 이름 입력 중에는 게임 키로 처리하지 않는다
-      if (e.target instanceof HTMLInputElement) return;
+      // 이름 입력과 포커스된 버튼의 기본 키보드 동작을 보존한다.
+      if (e.target instanceof HTMLInputElement ||
+          (e.target instanceof HTMLButtonElement && (e.key === 'Enter' || e.key === ' '))) return;
       if (BLOCK_SCROLL.has(e.code)) e.preventDefault();
       if (e.repeat) return;
       this.down.add(e.code);

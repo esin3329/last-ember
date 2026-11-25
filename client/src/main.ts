@@ -38,6 +38,7 @@ let acc = 0;
 let hitstop = 0;
 let levelUiKey = '';
 let starting = false;
+let retryRanked = false;
 let hintShown = false;
 // 개발 빌드 전용: ?autoplay 로 열면 봇이 대신 플레이한다(브라우저↔서버 검증 흐름을 손 안 대고 시험).
 const AUTOPLAY = import.meta.env.DEV && new URLSearchParams(location.search).has('autoplay');
@@ -95,6 +96,10 @@ function resetWorld(newSim: SimState): void {
   sim = newSim;
   playEpoch++; // 이전 화면에서 시작한 발급·리플레이·구간 동기화·제출 응답을 무시한다.
   starting = false;
+  ui.dom.ranked.disabled = false;
+  ui.dom.retry.disabled = false;
+  ui.dom.startStatus.classList.add('hidden');
+  ui.dom.startStatus.textContent = '';
   syncing = false;
   window.clearTimeout(syncNoticeTimer);
   submission.discard();
@@ -114,6 +119,7 @@ function resetWorld(newSim: SimState): void {
 function setMode(next: Mode): void {
   mode = next;
   document.body.classList.toggle('playing', next === 'play');
+  ui.dom.replayExit.classList.toggle('hidden', next !== 'replay');
 }
 
 function enterMenu(): void {
@@ -125,27 +131,32 @@ function enterMenu(): void {
   void refreshBoard();
 }
 
-async function startGame(): Promise<void> {
-  if (starting) return;
-  starting = true;
+async function startGame(ranked: boolean): Promise<void> {
+  if (ranked && starting) return;
   armBack();
   const epoch = playEpoch;
   sfx.unlock();
-  try {
-    localStorage.setItem('ember.name', ui.dom.name.value);
-  } catch {
-    /* 무시 */
+  let issued: api.IssueOutcome | null = null;
+  if (ranked) {
+    starting = true;
+    ui.dom.ranked.disabled = true;
+    ui.dom.retry.disabled = true;
+    ui.dom.startStatus.textContent = '랭킹 서버에 연결 중… 연습은 바로 시작할 수 있습니다.';
+    ui.dom.startStatus.classList.remove('hidden');
+    try {
+      localStorage.setItem('ember.name', ui.dom.name.value);
+    } catch {
+      /* 저장소를 사용할 수 없어도 플레이한다 */
+    }
+    issued = await api.issueRun();
+    if (epoch !== playEpoch) return;
   }
-  // 시드는 서버가 정한다(랭킹 v3: 0번 구간 시드만 받고 나머지는 구간마다 받는다).
-  // 서버가 없거나 한도에 걸리면 로컬 시드로 오프라인(v2 규칙) 플레이.
-  const issued = await api.issueRun();
-  if (epoch !== playEpoch) return;
-  starting = false;
-  const run = issued.kind === 'ok' && issued.run.simVersion === SIM_VERSION && issued.run.segmentFrames === SEGMENT_FRAMES ? issued.run : null;
+  const run = issued?.kind === 'ok' && issued.run.simVersion === SIM_VERSION && issued.run.segmentFrames === SEGMENT_FRAMES ? issued.run : null;
+  retryRanked = run !== null;
   runId = run ? run.runId : null;
   seed = run ? run.seed : randomSeed();
   playSegmentFrames = run ? run.segmentFrames : 0;
-  ui.setNet(issued.kind === 'offline' ? 'off' : 'on');
+  ui.dom.runMode.textContent = run ? '랭킹 도전' : '연습 · 랭킹 미기록';
   recorder = new InputRecorder();
   segRecorder = new InputRecorder();
   segmentSeeds = [];
@@ -157,8 +168,11 @@ async function startGame(): Promise<void> {
   // 처음 몇 초 동안만 조작 안내를 띄운다
   hintShown = true;
   ui.setBanner(document.body.classList.contains('touch') || matchMedia('(pointer: coarse)').matches ? '화면을 끌어 이동 · 대시 버튼으로 회피 · 공격은 자동' : 'WASD 이동 · Space 대시 · 공격은 자동');
-  if (issued.kind === 'quota') {
-    ui.toast(`${ISSUE_ERRORS[issued.error] ?? '랭킹 판을 받지 못했습니다'} — 이번 판은 기록되지 않습니다`);
+  if (ranked && !run) {
+    const reason = issued?.kind === 'quota'
+      ? (ISSUE_ERRORS[issued.error] ?? '랭킹 판을 받지 못했습니다')
+      : '랭킹 서버를 사용할 수 없습니다';
+    ui.toast(`${reason} — 연습으로 시작합니다`);
   }
 }
 
@@ -176,18 +190,20 @@ function startReplay(replaySeed: number, runs: number[], label: string, segmentF
   resetWorld(createSim(replaySeed, true, segmentFrames));
   ui.showMenu(false);
   ui.showHud(true);
+  ui.dom.runMode.textContent = '리플레이';
   updateBanner();
 }
 
 function updateBanner(): void {
-  ui.setBanner(`리플레이 · ${replayLabel} · ${replaySpeed}배속 — Space 속도 변경 · Esc 나가기`);
+  ui.setBanner(`${replayLabel} · ${replaySpeed}배속 — 배너 터치 또는 Space로 속도 변경`);
 }
 
 async function watchFromBoard(entry: api.BoardEntry): Promise<void> {
+  if (starting) return;
   armBack();
   const epoch = playEpoch;
   const data = await api.fetchReplay(entry.runId);
-  if (epoch !== playEpoch) return;
+  if (epoch !== playEpoch || starting) return;
   // v2(구 랭킹)와 v3(구간 시드) 기록을 모두 재생한다. 모르는 규칙 버전은 재생하지 않는다.
   const rules = data ? rulesFor(data.simVersion) : null;
   if (!data || !rules) {
@@ -282,7 +298,7 @@ async function syncSegment(): Promise<void> {
       segIndex = res.next.index;
     } else {
       runId = null;
-      ui.setNet('off');
+      ui.dom.runMode.textContent = '랭킹 연결 끊김 · 미기록';
       const reason = res.ok ? '서버 응답이 올바르지 않습니다' : (SYNC_ERRORS[res.error] ?? res.error);
       ui.toast(`${reason} — 로컬로 이어가며 이번 판은 기록되지 않습니다`);
     }
@@ -470,8 +486,10 @@ function handleEvents(events: SimEvent[]): void {
 
 function onFinish(): void {
   if (mode === 'menu') {
-    // 배경 데모는 끝나면 새 시드로 다시 시작
-    resetWorld(createSim(randomSeed()));
+    // 배경만 재시작한다. 메뉴에서 진행 중인 랭킹 발급·리플레이 요청은 유지한다.
+    sim = createSim(randomSeed());
+    fx.clear();
+    hitstop = 0;
     return;
   }
   finished = true;
@@ -485,6 +503,7 @@ function onFinish(): void {
   ];
 
   if (mode === 'replay') {
+    ui.dom.replayExit.classList.add('hidden');
     ui.showResult({ title: '리플레이 종료', tone: 'neutral', best: '', levels: sim.levels, score: r.score, stats, canRetry: false, canWatch: false });
     ui.setStatus('기록된 입력만으로 같은 판이 재현되었습니다.', 'ok');
     return;
@@ -503,7 +522,7 @@ function onFinish(): void {
   });
 
   if (!runId) {
-    ui.setStatus('오프라인 플레이 — 서버에 연결되면 기록이 등록됩니다.', '');
+    ui.setStatus('이 판은 랭킹에 등록되지 않습니다. 최고 점수는 이 브라우저에 저장됩니다.', '');
     return;
   }
   // 결과·이름·체크섬과 마지막 구간 입력을 지금 값으로 고정한다. 재시도해도 같은 값으로만 제출된다.
@@ -566,6 +585,8 @@ const SYNC_ERRORS: Record<string, string> = {
 function togglePause(): void {
   if (mode !== 'play' || finished) return;
   paused = !paused;
+  kb.reset();
+  ui.dom.pauseStatus.classList.toggle('hidden', !runId);
   if (!paused) armBack();
   sfx.setMusic(!paused && sim.phase === 'playing');
   ui.showPause(paused);
@@ -605,11 +626,12 @@ kb.onPress = (code) => {
   if (code === 'KeyM') ui.toast(sfx.toggleMute() ? '음소거' : '소리 켜짐');
   if (code === 'F3') debugOn = !debugOn;
   if (code === 'Escape') {
-    if (mode === 'replay' || (mode === 'play' && finished)) returnToMenu();
+    if (mode === 'replay' || (mode === 'play' && finished) || starting) returnToMenu();
     else togglePause();
   }
   if (code === 'Enter' || code === 'NumpadEnter') {
-    if (mode === 'menu' || (mode === 'play' && finished)) void startGame();
+    if (mode === 'menu') void startGame(false);
+    else if (mode === 'play' && finished && !starting) void startGame(retryRanked);
   }
   if (code === 'Space' && mode === 'replay' && !finished) {
     replaySpeed = replaySpeed >= 8 ? 1 : replaySpeed * 2;
@@ -617,18 +639,20 @@ kb.onPress = (code) => {
   }
 };
 
-ui.dom.start.addEventListener('click', () => void startGame());
+ui.dom.practice.addEventListener('click', () => void startGame(false));
+ui.dom.ranked.addEventListener('click', () => void startGame(true));
 ui.dom.name.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.isComposing) {
     ui.dom.name.blur();
-    void startGame();
+    void startGame(true);
   }
 });
-ui.dom.retry.addEventListener('click', () => void startGame());
+ui.dom.retry.addEventListener('click', () => void startGame(retryRanked));
 ui.dom.watch.addEventListener('click', () => {
   if (lastRun) startReplay(lastRun.seed, lastRun.runs, '방금 플레이', lastRun.segmentFrames, lastRun.segmentSeeds);
 });
 ui.dom.toMenu.addEventListener('click', returnToMenu);
+ui.dom.replayExit.addEventListener('click', returnToMenu);
 ui.dom.resume.addEventListener('click', togglePause);
 ui.dom.quit.addEventListener('click', returnToMenu);
 setupTouch(canvas, kb, togglePause);
@@ -637,10 +661,6 @@ kb.onGamepadDisconnect = () => {
   if (mode === 'play' && !paused && !finished) togglePause();
 };
 ui.dom.resubmit.addEventListener('click', () => submission.retry());
-// 버튼에 포커스가 있을 때 Enter/Space가 전역 새 판 시작·대시로 가로채이지 않게 한다.
-ui.dom.resubmit.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-});
 // 터치 기기에서는 배너를 눌러 리플레이 속도를 바꾼다
 ui.dom.banner.addEventListener('click', () => {
   if (mode !== 'replay' || finished) return;

@@ -26,7 +26,7 @@ const el = {
   boss: $('boss'), bossFill: $('bossfill'), build: $('build'),
   combo: $('combo'), mult: $('mult'), comboBox: $('combo-box'),
   banner: $('banner'), toast: $('toast'),
-  menu: $('menu'), name: $<HTMLInputElement>('name'), practice: $<HTMLButtonElement>('start'),
+  menu: $('menu'), name: $<HTMLInputElement>('name'), tutorial: $<HTMLButtonElement>('start'),
   ranked: $<HTMLButtonElement>('ranked-start'), startStatus: $('start-status'),
   net: $('net'), board: $('board'), runMode: $('run-mode'), replayExit: $('replay-exit'),
   levelup: $('levelup'), cards: $('cards'),
@@ -36,6 +36,7 @@ const el = {
   resultBest: $('result-best'), resultBuild: $('result-build'),
   retry: $<HTMLButtonElement>('retry'), watch: $('watch'), toMenu: $('tomenu'),
   resubmit: $<HTMLButtonElement>('resubmit'),
+  tutorialComplete: $('tutorial-complete'), tutorialDone: $('tutorial-done'),
   debug: $('debug'),
 };
 

@@ -246,7 +246,8 @@ function clamp(v: number, lo: number, hi: number): number {
 
 // ───────────────────────── 한 틱 진행 ─────────────────────────
 
-export function step(s: SimState, inp: InputFrame): void {
+/** 스크립트형 시나리오는 적 배치와 종료 조건을 직접 결정한다. */
+export function step(s: SimState, inp: InputFrame, scripted = false): void {
   s.events.length = 0;
   if (s.phase === 'dead' || s.phase === 'won') return;
   if (segmentDue(s)) throw new Error('segment seed required: call beginSegment() before step()');
@@ -265,7 +266,7 @@ export function step(s: SimState, inp: InputFrame): void {
 
   s.tick++;
   updatePlayer(s, inp);
-  spawnDirector(s);
+  if (!scripted) spawnDirector(s);
   updateEnemies(s);
   buildGrid(s);
   separateEnemies(s);
@@ -282,7 +283,7 @@ export function step(s: SimState, inp: InputFrame): void {
   if ((s.phase as Phase) === 'won') {
     s.score += Math.floor(p.hp) * 20;
     if (s.emit) s.events.push({ t: 'win' });
-  } else if (p.hp <= 0 || s.tick >= MAX_TICKS) {
+  } else if (p.hp <= 0 || (!scripted && s.tick >= MAX_TICKS)) {
     p.hp = 0;
     s.phase = 'dead';
     if (s.emit) s.events.push({ t: 'dead' });
@@ -362,7 +363,7 @@ function randDir(s: SimState): void {
   }
 }
 
-function spawnEnemy(s: SimState, kind: Kind, x: number, y: number, cap: number): Enemy | null {
+export function spawnEnemy(s: SimState, kind: Kind, x: number, y: number, cap: number): Enemy | null {
   if (s.enemies.length >= cap) return null;
   const def = ENEMY_DEFS[kind];
   const scale = kind === Kind.Boss ? 1 : 1 + (s.tick * DT) / 100;

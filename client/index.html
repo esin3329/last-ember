@@ -74,8 +74,8 @@
       <div class="panel hero">
         <h1>LAST EMBER</h1>
         <p class="tag">어둠이 밀려온다. 3분을 버티고 심연의 핵을 부숴라.</p>
-        <button id="start" class="primary" type="button">연습 시작 <kbd>Enter</kbd></button>
-        <p class="hint practice-hint">서버 연결 없이 바로 시작 · 최고 점수는 이 브라우저에 저장</p>
+        <button id="start" class="primary" type="button">튜토리얼 <kbd>Enter</kbd></button>
+        <p class="hint tutorial-hint">이동·대시·자동 공격·강화 익히기 · 랭킹 미기록</p>
         <div class="ranked-start">
           <label class="name">랭킹 이름 (선택)
             <input id="name" maxlength="12" placeholder="익명" autocomplete="off" spellcheck="false" />
@@ -93,7 +93,7 @@
       </div>
       <div class="panel board">
         <h2>리더보드 <span id="net" class="net">연결 확인 중</span></h2>
-        <p class="hint">서버가 입력 기록을 재실행해 검증한 점수만 올라갑니다. ▶ 를 누르면 그 판을 그대로 다시 봅니다.</p>
+        <p class="hint">사망하거나 보스를 쓰러뜨린 뒤, 서버 검증이 끝나면 순위가 갱신됩니다. ▶ 로 리플레이를 볼 수 있습니다.</p>
         <ol id="board"></ol>
       </div>
     </div>
@@ -125,6 +125,14 @@
       <button id="retry" class="primary">다시 하기 <kbd>Enter</kbd></button>
       <button id="watch">방금 판 리플레이</button>
       <button id="tomenu">메뉴로</button>
+    </div>
+  </section>
+
+  <section id="tutorial-complete" class="overlay hidden" aria-labelledby="tutorial-title">
+    <div class="panel small">
+      <h2 id="tutorial-title">튜토리얼 완료</h2>
+      <p class="hint">실전에서는 3분을 버티고 보스 ‘심연의 핵’을 쓰러뜨리세요.</p>
+      <button id="tutorial-done" class="primary" type="button">메뉴로 <kbd>Enter</kbd></button>
     </div>
   </section>
 

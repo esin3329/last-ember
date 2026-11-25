@@ -54,7 +54,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
-      const hit = await cache.match(req.mode === 'navigate' ? ENTRY : req, { ignoreSearch: true });
+      // 캐시에는 정적 빌드 파일만 있다. precache와 모듈 요청의 Origin 헤더가
+      // 달라도 Vary: Origin을 붙이는 호스트에서 같은 파일을 오프라인으로 제공한다.
+      const hit = await cache.match(req.mode === 'navigate' ? ENTRY : req, { ignoreSearch: true, ignoreVary: true });
       return hit ?? fetch(req);
     })(),
   );
